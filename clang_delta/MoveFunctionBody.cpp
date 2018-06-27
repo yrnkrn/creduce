@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012 The University of Utah
+// Copyright (c) 2012, 2015 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -38,7 +38,7 @@ bool MoveFunctionBody::HandleTopLevelDecl(DeclGroupRef D)
 {
   for (DeclGroupRef::iterator I = D.begin(), E = D.end(); I != E; ++I) {
     FunctionDecl *FD = dyn_cast<FunctionDecl>(*I);
-    if (!FD) {
+    if (!FD || isInIncludedFile(FD)) {
       PrevFunctionDecl = NULL;
       continue;
     }

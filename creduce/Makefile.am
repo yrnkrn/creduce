@@ -1,6 +1,6 @@
 ## -*- mode: Makefile-Automake -*-
 ##
-## Copyright (c) 2012, 2013 The University of Utah
+## Copyright (c) 2012, 2013, 2015, 2016 The University of Utah
 ## All rights reserved.
 ##
 ## This file is distributed under the University of Illinois Open Source
@@ -23,22 +23,32 @@ dist_perllib_DATA = \
 	pass_clang.pm \
 	pass_clang_binsrch.pm \
 	pass_clex.pm \
-	pass_special.pm \
+	pass_comments.pm \
+	pass_include_includes.pm \
+	pass_includes.pm \
 	pass_indent.pm \
 	pass_ints.pm \
 	pass_lines.pm \
 	pass_peep.pm \
-	pass_ternary.pm
+	pass_special.pm \
+	pass_ternary.pm \
+	pass_unifdef.pm
 nodist_perllib_DATA = \
 	creduce_config.pm
 
 EXTRA_DIST = \
+	CMakeLists.txt \
 	creduce.in \
 	creduce_config.pm.in
 
 ###############################################################################
 
 GIT_HASH := $(shell "$(top_srcdir)/git-hash.sh" "$(top_srcdir)" || echo error)
+
+DUMMY1 := $(shell echo "$(GIT_HASH)" > git_version.txt.tmp)
+DUMMY2 := $(shell cmp -s git_version.txt.tmp git_version.txt || \
+		  cp git_version.txt.tmp git_version.txt)
+DUMMY3 := $(shell rm -f git_version.txt.tmp)
 
 # Follow the recipe described in the Autoconf manual for inserting Autoconf
 # variables into scripts.  Notably, do *not* use AC_CONFIG_FILES in the root
@@ -75,12 +85,9 @@ creduce_config_edit = sed \
 	-e 's|@PACKAGE_VERSION[@]|$(PACKAGE_VERSION)|g' \
 	-e 's|@VERSION[@]|$(VERSION)|g' \
 	-e 's|@GIT_HASH[@]|$(GIT_HASH)|g' \
-	-e 's|@ASTYLE[@]|$(ASTYLE)|g' \
-	-e 's|@CLANG_FORMAT[@]|$(CLANG_FORMAT)|g' \
-	-e 's|@INDENT[@]|$(INDENT)|g' \
-	-e 's|@TOPFORMFLAT[@]|$(TOPFORMFLAT)|g'
+	-e 's|@CLANG_FORMAT[@]|$(CLANG_FORMAT)|g'
 
-creduce_config.pm: Makefile
+creduce_config.pm: Makefile git_version.txt
 	rm -f $@ $@.tmp
 	srcdir=''; \
 	  test -f ./$@.in || srcdir=$(srcdir)/; \
@@ -91,7 +98,9 @@ creduce_config.pm: creduce_config.pm.in
 
 CLEANFILES = \
 	creduce \
-	creduce_config.pm
+	creduce_config.pm \
+	git_version.txt \
+	git_version.txt.tmp
 
 ###
 

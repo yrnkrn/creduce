@@ -1,6 +1,6 @@
 ## -*- mode: Perl -*-
 ##
-## Copyright (c) 2012, 2013 The University of Utah
+## Copyright (c) 2012, 2013, 2015, 2016 The University of Utah
 ## All rights reserved.
 ##
 ## This file is distributed under the University of Illinois Open Source
@@ -27,14 +27,11 @@ use constant {
 
     VERSION		=> q{@VERSION@},
 
-    GIT_HASH		=> q{@GIT_HASH@},
+    GIT_VERSION		=> q{@GIT_HASH@},
 
     # External programs invoked.
     #
-    ASTYLE		=> q{@ASTYLE@},
     CLANG_FORMAT	=> q{@CLANG_FORMAT@},
-    INDENT		=> q{@INDENT@},
-    TOPFORMFLAT		=> q{@TOPFORMFLAT@},
 };
 
 our @EXPORT = qw();
@@ -47,11 +44,8 @@ our @EXPORT_OK = qw(
     PACKAGE_URL
     PACKAGE_VERSION
     VERSION
-    GIT_HASH
-    ASTYLE
+    GIT_VERSION
     CLANG_FORMAT
-    INDENT
-    TOPFORMFLAT
     );
 our %EXPORT_TAGS = qw();
 

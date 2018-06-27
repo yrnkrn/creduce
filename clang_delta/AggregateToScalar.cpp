@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2013 The University of Utah
+// Copyright (c) 2012, 2013, 2015, 2016, 2017 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -23,7 +23,6 @@
 #include "TransformationManager.h"
 
 using namespace clang;
-using namespace llvm;
 
 static const char *DescriptionMsg =
 "Replace accesses to an aggregate member with \
@@ -59,6 +58,9 @@ private:
 
 bool ATSCollectionVisitor::VisitMemberExpr(MemberExpr *ME)
 {
+  if (ConsumerInstance->isInIncludedFile(ME))
+    return true;
+
   ValueDecl *OrigDecl = ME->getMemberDecl();
   FieldDecl *FD = dyn_cast<FieldDecl>(OrigDecl);
 
@@ -84,6 +86,9 @@ bool ATSCollectionVisitor::VisitMemberExpr(MemberExpr *ME)
 
 bool ATSCollectionVisitor::VisitArraySubscriptExpr(ArraySubscriptExpr *ASE)
 {
+  if (ConsumerInstance->isInIncludedFile(ASE))
+    return true;
+
   const Type *T = ASE->getType().getTypePtr();
   if (!T->isScalarType())
     return true;
@@ -198,7 +203,6 @@ bool AggregateToScalar::createNewVar(const Expr *RefE, std::string &VarName)
 
   const InitListExpr *ILE = dyn_cast<InitListExpr>(IE);
   if (!ILE) {
-    TransAssert(dyn_cast<CXXConstructExpr>(IE));
     return addTmpVar(RefE, VarName, NULL);
   }
 
@@ -208,7 +212,16 @@ bool AggregateToScalar::createNewVar(const Expr *RefE, std::string &VarName)
     return addTmpVar(RefE, VarName, NULL);
 
   std::string InitStr;
-  RewriteHelper->getExprString(InitE, InitStr);
+  if (InitE->getLocStart().isInvalid()) {
+    const Type *ET = InitE->getType().getTypePtr();
+    if (ET->isIntegerType() || ET->isPointerType())
+      InitStr = "0"; 
+    else
+      return addTmpVar(RefE, VarName, NULL);
+  }
+  else {
+    RewriteHelper->getExprString(InitE, InitStr);
+  }
   return addTmpVar(RefE, VarName, &InitStr);
 }
 

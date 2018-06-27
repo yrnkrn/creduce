@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2013, 2014, 2015 The University of Utah
+// Copyright (c) 2012, 2013, 2014, 2015, 2016, 2017 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -24,7 +24,6 @@
 #include "CommonStatementVisitor.h"
 
 using namespace clang;
-using namespace llvm;
 
 static const char *DescriptionMsg =
 "A really simple inliner. \
@@ -54,7 +53,7 @@ will remove it entirely. \n";
 static RegisterTransformation<SimpleInliner>
          Trans("simple-inliner", DescriptionMsg);
 
-class SimpleInlinerCollectionVisitor : public 
+class SimpleInlinerCollectionVisitor : public
   RecursiveASTVisitor<SimpleInlinerCollectionVisitor> {
 
 public:
@@ -85,7 +84,7 @@ private:
   unsigned int NumStmts;
 };
 
-class SimpleInlinerFunctionVisitor : public 
+class SimpleInlinerFunctionVisitor : public
   RecursiveASTVisitor<SimpleInlinerFunctionVisitor> {
 
 public:
@@ -104,7 +103,7 @@ private:
 
 };
 
-class SimpleInlinerFunctionStmtVisitor : public 
+class SimpleInlinerFunctionStmtVisitor : public
         RecursiveASTVisitor<SimpleInlinerFunctionStmtVisitor> {
 public:
 
@@ -116,10 +115,10 @@ public:
 
 private:
   SimpleInliner *ConsumerInstance;
-  
+
 };
 
-class SimpleInlinerStmtVisitor : public 
+class SimpleInlinerStmtVisitor : public
   CommonStatementVisitor<SimpleInlinerStmtVisitor> {
 
 public:
@@ -179,10 +178,10 @@ bool SimpleInlinerCollectionVisitor::VisitCallExpr(CallExpr *CE)
   return true;
 }
 
-// Overload the default traverse function, because we cannot inline 
+// Overload the default traverse function, because we cannot inline
 // Ctor's initializer
 bool SimpleInlinerCollectionVisitor::TraverseConstructorInitializer(
-       CXXCtorInitializer *Init) 
+       CXXCtorInitializer *Init)
 {
   return true;
 }
@@ -198,13 +197,14 @@ bool SimpleInlinerFunctionVisitor::VisitDeclRefExpr(DeclRefExpr *DRE)
   const ValueDecl *OrigDecl = DRE->getDecl();
   const ParmVarDecl *PD = dyn_cast<ParmVarDecl>(OrigDecl);
   if (PD)
-     ConsumerInstance->ParmRefs.push_back(DRE); 
+     ConsumerInstance->ParmRefs.push_back(DRE);
   return true;
 }
 
 bool SimpleInlinerFunctionStmtVisitor::VisitFunctionDecl(FunctionDecl *FD)
 {
-  if (!FD->isThisDeclarationADefinition())
+  if (ConsumerInstance->isInIncludedFile(FD) ||
+      !FD->isThisDeclarationADefinition())
     return true;
 
   ConsumerInstance->CurrentFD = FD;
@@ -212,13 +212,13 @@ bool SimpleInlinerFunctionStmtVisitor::VisitFunctionDecl(FunctionDecl *FD)
   ConsumerInstance->CollectionVisitor->TraverseDecl(FD);
 
   if (!FD->isVariadic()) {
-    ConsumerInstance->FunctionDeclNumStmts[FD->getCanonicalDecl()] = 
+    ConsumerInstance->FunctionDeclNumStmts[FD->getCanonicalDecl()] =
       ConsumerInstance->CollectionVisitor->getNumStmts();
   }
   return true;
 }
 
-bool SimpleInlinerStmtVisitor::VisitCallExpr(CallExpr *CallE) 
+bool SimpleInlinerStmtVisitor::VisitCallExpr(CallExpr *CallE)
 {
   if (ConsumerInstance->TheCallExpr == CallE) {
     ConsumerInstance->TheStmt = CurrentStmt;
@@ -229,10 +229,10 @@ bool SimpleInlinerStmtVisitor::VisitCallExpr(CallExpr *CallE)
   return true;
 }
 
-void SimpleInliner::Initialize(ASTContext &context) 
+void SimpleInliner::Initialize(ASTContext &context)
 {
   Transformation::Initialize(context);
-  NameQueryWrap = 
+  NameQueryWrap =
     new TransNameQueryWrap(RewriteHelper->getTmpVarNamePrefix());
   CollectionVisitor = new SimpleInlinerCollectionVisitor(this);
   FunctionVisitor = new SimpleInlinerFunctionVisitor(this);
@@ -240,7 +240,7 @@ void SimpleInliner::Initialize(ASTContext &context)
   StmtVisitor = new SimpleInlinerStmtVisitor(this);
 }
 
-bool SimpleInliner::HandleTopLevelDecl(DeclGroupRef D) 
+bool SimpleInliner::HandleTopLevelDecl(DeclGroupRef D)
 {
   for (DeclGroupRef::iterator I = D.begin(), E = D.end(); I != E; ++I) {
     FunctionStmtVisitor->TraverseDecl(*I);
@@ -288,7 +288,7 @@ bool SimpleInliner::isValidArgExpr(const Expr *E)
   case Expr::GNUNullExprClass:
   case Expr::CharacterLiteralClass: // Fall-through
     return true;
-  
+
   case Expr::ParenExprClass:
     return isValidArgExpr(cast<ParenExpr>(E)->getSubExpr());
 
@@ -318,7 +318,8 @@ bool SimpleInliner::hasValidArgExprs(const CallExpr *CE)
 {
   for(CallExpr::const_arg_iterator I = CE->arg_begin(), E = CE->arg_end();
       I != E; ++I) {
-    if (!isValidArgExpr(*I))
+    const Expr *Exp = *I;
+    if (!isValidArgExpr(Exp))
       return false;
   }
   return true;
@@ -346,7 +347,7 @@ void SimpleInliner::doAnalysis(void)
   for (SmallVector<CallExpr *, 10>::iterator CI = AllCallExprs.begin(),
        CE = AllCallExprs.end(); CI != CE; ++CI) {
 
-    FunctionDecl *CalleeDecl = (*CI)->getDirectCallee(); 
+    FunctionDecl *CalleeDecl = (*CI)->getDirectCallee();
     TransAssert(CalleeDecl && "Bad CalleeDecl!");
     FunctionDecl *CanonicalDecl = CalleeDecl->getCanonicalDecl();
     if (!ValidFunctionDecls.count(CanonicalDecl))
@@ -368,7 +369,7 @@ void SimpleInliner::doAnalysis(void)
           }
         }
       }
-      TransAssert(CalleeDecl->isThisDeclarationADefinition() && 
+      TransAssert(CalleeDecl->isThisDeclarationADefinition() &&
                   "Bad CalleeDecl!");
       CurrentFD = CalleeDecl;
       TheCaller = CalleeToCallerMap[(*CI)];
@@ -394,15 +395,24 @@ void SimpleInliner::createReturnVar(void)
 
   // We don't need tmp var
   if (FDType->isVoidType() && CallExprType->isVoidType()) {
-    return; 
+    return;
   }
 
   TmpVarName = getNewTmpName();
   std::string VarStr = TmpVarName;
-  CurrentFD->getReturnType().getAsStringInternal(VarStr, 
+  CurrentFD->getReturnType().getAsStringInternal(VarStr,
                                Context->getPrintingPolicy());
   VarStr += ";";
   RewriteHelper->addLocalVarToFunc(VarStr, TheCaller);
+}
+
+bool SimpleInliner::hasNameClash(const std::string &ParmName, const Expr *E)
+{
+  E = E->IgnoreParenCasts();
+  const DeclRefExpr *DRE = dyn_cast<DeclRefExpr>(E);
+  if (!DRE)
+    return false;
+  return ParmName == DRE->getDecl()->getNameAsString();
 }
 
 void SimpleInliner::generateParamStrings(void)
@@ -414,14 +424,27 @@ void SimpleInliner::generateParamStrings(void)
   for(Idx = 0; Idx < FD->getNumParams(); ++Idx) {
     const ParmVarDecl *PD = FD->getParamDecl(Idx);
     std::string ParmStr = PD->getNameAsString();
-    PD->getType().getAsStringInternal(ParmStr, 
-                                      Context->getPrintingPolicy());
     if (Idx < ArgNum) {
       const Expr *Arg = TheCallExpr->getArg(Idx);
-      ParmStr += " = ";
-      std::string ArgStr("");
+      std::string ArgStr;
       RewriteHelper->getExprString(Arg, ArgStr);
-      ParmStr += ArgStr;
+
+      // create a new tmp for parms with name clash
+      if (hasNameClash(ParmStr, Arg)) {
+        std::string TmpName = getNewTmpName();
+        std::string NewParmStr = TmpName;
+        PD->getType().getAsStringInternal(NewParmStr,
+                                          Context->getPrintingPolicy());
+        ParmsWithNameClash.push_back(NewParmStr + " = " + ArgStr + ";\n");
+        ArgStr = TmpName;
+      }
+      PD->getType().getAsStringInternal(ParmStr,
+                                        Context->getPrintingPolicy());
+      ParmStr += " = " + ArgStr;
+    }
+    else {
+      PD->getType().getAsStringInternal(ParmStr,
+                                        Context->getPrintingPolicy());
     }
     ParmStr += ";\n";
     ParmStrings.push_back(ParmStr);
@@ -447,14 +470,14 @@ void SimpleInliner::insertReturnStmt
 
   if (I == E)
     SortedReturnStmts.push_back(ReturnStmtOffPair);
-  else 
+  else
     SortedReturnStmts.insert(I, ReturnStmtOffPair);
 }
 
-void SimpleInliner::sortReturnStmtsByOffs(const char *StartBuf, 
+void SimpleInliner::sortReturnStmtsByOffs(const char *StartBuf,
        std::vector< std::pair<ReturnStmt *, int> > &SortedReturnStmts)
 {
-  for (ReturnStmtsVector::iterator I = ReturnStmts.begin(), 
+  for (ReturnStmtsVector::iterator I = ReturnStmts.begin(),
        E = ReturnStmts.end(); I != E; ++I) {
     ReturnStmt *RS = (*I);
     SourceLocation RSLocStart = RS->getLocStart();
@@ -496,7 +519,7 @@ void SimpleInliner::copyFunctionBody(void)
   int TmpVarNameSize = static_cast<int>(TmpVarStr.size());
 
   for(std::vector< std::pair<ReturnStmt *, int> >::iterator
-      I = SortedReturnStmts.begin(), E = SortedReturnStmts.end(); 
+      I = SortedReturnStmts.begin(), E = SortedReturnStmts.end();
       I != E; ++I) {
 
     ReturnStmt *RS = (*I).first;
@@ -514,11 +537,37 @@ void SimpleInliner::copyFunctionBody(void)
     Delta -= ReturnSZ;
   }
 
+  if (ParmsWithNameClash.size()) {
+    std::string ExtraStr;
+    for (auto Parm : ParmsWithNameClash) {
+      ExtraStr += Parm;
+    }
+    FuncBodyStr = "{\n" + ExtraStr + FuncBodyStr + "}\n"; 
+  }
+
   RewriteHelper->addStringBeforeStmt(TheStmt, FuncBodyStr, NeedParen);
 }
 
 void SimpleInliner::removeFunctionBody(void)
 {
+  if (FunctionDecl *FD = CurrentFD->getInstantiatedFromMemberFunction()) {
+    CXXMethodDecl *MD = dyn_cast<CXXMethodDecl>(FD);
+    // CurrentFD is instantiated from a member function. Extend the source
+    // begin to the outer template keyword.
+    if (MD && MD->getParent()->getDescribedClassTemplate()) {
+      CXXMethodDecl *MostRecent = MD->getMostRecentDecl();
+      if (MostRecent != MD) {
+        TheRewriter.RemoveText(MostRecent->getSourceRange());
+        return;
+      }
+    }
+  }
+
+  if (FunctionTemplateDecl *FTD = CurrentFD->getPrimaryTemplate()) {
+    TheRewriter.RemoveText(FTD->getSourceRange());
+    return;
+  }
+
   SourceRange FDRange = CurrentFD->getSourceRange();
   TheRewriter.RemoveText(FDRange);
 }
@@ -527,6 +576,8 @@ void SimpleInliner::replaceCallExpr(void)
 {
   // Create a new tmp var for return value
   createReturnVar();
+  // reset ParmsWithNameClash
+  ParmsWithNameClash.clear();
   generateParamStrings();
   copyFunctionBody();
   RewriteHelper->replaceExprNotInclude(TheCallExpr, TmpVarName);

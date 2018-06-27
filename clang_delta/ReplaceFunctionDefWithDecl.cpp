@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2013, 2014 The University of Utah
+// Copyright (c) 2012, 2013, 2014, 2015, 2016, 2017 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -48,7 +48,11 @@ private:
 bool ReplaceFunctionDefWithDeclCollectionVisitor::VisitFunctionDecl(
        FunctionDecl *FD)
 {
+  if (ConsumerInstance->isInIncludedFile(FD))
+    return true;
+
   if (FD->isThisDeclarationADefinition() && 
+      FD->hasBody() &&
       !FD->isDeleted() &&
       !FD->isDefaulted() &&
       !ConsumerInstance->isMacroExpansion(FD))
@@ -117,7 +121,7 @@ void ReplaceFunctionDefWithDecl::removeCtorInitializers(
   // namespace NS { struct A {}; }
   // struct B : NS::A { B() : NS::A() {} };
   SourceLocation Loc = RewriteHelper->getLocationFromLeftUntil(LocStart, ':');
-  Loc = RewriteHelper->getLocationFromLeftUntil(LocStart, ')');
+  Loc = RewriteHelper->getLocationFromLeftUntil(Loc, ')');
   TheRewriter.RemoveText(SourceRange(Loc.getLocWithOffset(1), 
                                      LocStart.getLocWithOffset(-1)));
   CXXConstructorDecl::init_const_iterator E = Ctor->init_end();

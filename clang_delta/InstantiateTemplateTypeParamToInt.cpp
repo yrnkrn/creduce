@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2013 The University of Utah
+// Copyright (c) 2012, 2013, 2015, 2017 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -21,7 +21,6 @@
 #include "TransformationManager.h"
 
 using namespace clang;
-using namespace llvm;
 
 // TODO: probably need to handle more cases where this transformation
 // generates invalid code, e.g.:
@@ -204,7 +203,8 @@ void InstantiateTemplateTypeParamToInt::Initialize(ASTContext &context)
 
 void InstantiateTemplateTypeParamToInt::HandleTranslationUnit(ASTContext &Ctx)
 {
-  if (TransformationManager::isCLangOpt()) {
+  if (TransformationManager::isCLangOpt() ||
+      TransformationManager::isOpenCLLangOpt()) {
     ValidInstanceNum = 0;
   }
   else {
@@ -232,6 +232,9 @@ void InstantiateTemplateTypeParamToInt::HandleTranslationUnit(ASTContext &Ctx)
 
 void InstantiateTemplateTypeParamToInt::handleOneTemplateDecl(const TemplateDecl *D)
 {
+  if (isInIncludedFile(D))
+    return;
+
   // doesn't handle TypeAliasTemplateDecl
   TransAssert((!dyn_cast<TypeAliasTemplateDecl>(D)) && 
               "Doesn't support TypeAliasTemplateDecl!");

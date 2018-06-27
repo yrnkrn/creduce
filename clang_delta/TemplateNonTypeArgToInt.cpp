@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2013, 2015 The University of Utah
+// Copyright (c) 2012, 2013, 2015, 2016, 2017 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -22,7 +22,6 @@
 #include "CommonTemplateArgumentVisitor.h"
 
 using namespace clang;
-using namespace llvm;
 using namespace clang_delta_common_visitor;
 
 static const char *DescriptionMsg = 
@@ -87,7 +86,8 @@ void TemplateNonTypeArgToInt::Initialize(ASTContext &context)
 
 void TemplateNonTypeArgToInt::HandleTranslationUnit(ASTContext &Ctx)
 {
-  if (TransformationManager::isCLangOpt()) {
+  if (TransformationManager::isCLangOpt() ||
+      TransformationManager::isOpenCLLangOpt()) {
     ValidInstanceNum = 0;
   }
   else {
@@ -104,8 +104,16 @@ void TemplateNonTypeArgToInt::HandleTranslationUnit(ASTContext &Ctx)
   }
 
   Ctx.getDiagnostics().setSuppressAllDiagnostics(false);
-  TransAssert(TheExpr && "NULL TheExpr");
-  RewriteHelper->replaceExpr(TheExpr, IntString);
+  if (TheExpr) {
+    RewriteHelper->replaceExpr(TheExpr, IntString);
+  }
+  else if (TheValueDecl) {
+    RewriteHelper->replaceValueDecl(TheValueDecl,
+                                    "int " + TheValueDecl->getNameAsString());
+  }
+  else {
+    TransAssert(0 && "No valid targets!");
+  }
 
   if (Ctx.getDiagnostics().hasErrorOccurred() ||
       Ctx.getDiagnostics().hasFatalErrorOccurred())
@@ -122,7 +130,7 @@ bool TemplateNonTypeArgToInt::isValidTemplateArgument(
   }
 
   case TemplateArgument::Expression: {
-    const Expr *E = Arg.getAsExpr();
+    const Expr *E = Arg.getAsExpr()->IgnoreParenCasts();
     if (dyn_cast<IntegerLiteral>(E) || dyn_cast<CXXBoolLiteralExpr>(E))
       return false;
     if (const UnaryOperator *UO = dyn_cast<UnaryOperator>(E)) {
@@ -204,20 +212,31 @@ bool TemplateNonTypeArgToInt::isValidParameter(const NamedDecl *ND)
           dyn_cast<NonTypeTemplateParmDecl>(ND);
   if (!NonTypeD)
     return false;
+  // To avoid something like replacing int with int.
+  if (NonTypeD->getType().getAsString() == "int")
+    return false;
   const Type *Ty = NonTypeD->getType().getTypePtr();
   return Ty->isIntegerType();
 }
       
 void TemplateNonTypeArgToInt::handleOneTemplateDecl(const TemplateDecl *D)
 {
+  if (isInIncludedFile(D))
+    return;
   TemplateParameterIdxSet *ValidParamIdx = new TemplateParameterIdxSet();
   TemplateParameterList *TPList = D->getTemplateParameters();
   unsigned Idx = 0;
   for (TemplateParameterList::const_iterator I = TPList->begin(),
        E = TPList->end(); I != E; ++I) {
     const NamedDecl *ParamND = (*I);
-    if (isValidParameter(ParamND))
+    if (isValidParameter(ParamND)) {
       ValidParamIdx->insert(Idx);
+      if (const ValueDecl* ValD = dyn_cast<ValueDecl>(ParamND)) {
+        ++ValidInstanceNum;
+        if (ValidInstanceNum == TransformationCounter)
+          TheValueDecl = ValD;
+      }
+    }
     Idx++;
   }
 

@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2013, 2014 The University of Utah
+// Copyright (c) 2012, 2013, 2014, 2015, 2016, 2017 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -23,7 +23,6 @@
 #include "TransformationManager.h"
 
 using namespace clang;
-using namespace llvm;
 
 static const char *DescriptionMsg =
 "Another pass to increase readability of reduced code. \
@@ -62,12 +61,15 @@ private:
 
   RenameParam *ConsumerInstance;
 
-  DenseMap<ParmVarDecl *, std::string> ParamNameMap;
+  llvm::DenseMap<ParmVarDecl *, std::string> ParamNameMap;
 
 };
 
 bool ExistingVarCollectionVisitor::VisitVarDecl(VarDecl *VD)
 {
+  if (ConsumerInstance->isInIncludedFile(VD))
+    return true;
+ 
   ParmVarDecl *PD = dyn_cast<ParmVarDecl>(VD);
   if (PD) {
     ConsumerInstance->validateParam(PD);
@@ -87,7 +89,7 @@ bool ExistingVarCollectionVisitor::VisitVarDecl(VarDecl *VD)
 
 bool RenameParamVisitor::VisitFunctionDecl(FunctionDecl *FD)
 {
-  if (FD->param_size() == 0)
+  if (ConsumerInstance->isInIncludedFile(FD) || (FD->param_size() == 0))
     return true;
 
   FunctionDecl *CanonicalFD = FD->getCanonicalDecl();
@@ -117,10 +119,12 @@ bool RenameParamVisitor::VisitFunctionDecl(FunctionDecl *FD)
 
 bool RenameParamVisitor::VisitDeclRefExpr(DeclRefExpr *DRE)
 {
+  if (ConsumerInstance->isInIncludedFile(DRE))
+    return true;
   ValueDecl *OrigDecl = DRE->getDecl();
   ParmVarDecl *PD = dyn_cast<ParmVarDecl>(OrigDecl);
   
-  if (!PD)
+  if (!PD || ConsumerInstance->isInIncludedFile(PD))
     return true;
 
   llvm::DenseMap<ParmVarDecl *, std::string>::iterator I =
@@ -191,7 +195,7 @@ bool RenameParam::getPostfixValue(const std::string &Name,
 void RenameParam::validateParam(ParmVarDecl *PD)
 {
   unsigned int Value;
-  if (!getPostfixValue(PD->getNameAsString(), Value))
+  if (PD->isReferenced() && !getPostfixValue(PD->getNameAsString(), Value))
     HasValidParams = true;
 }
 
@@ -216,7 +220,7 @@ void RenameParam::addLocalVar(VarDecl *VD)
   FunctionDecl *CanonicalFD = FD->getCanonicalDecl();
 
   ExistingNumberSet *CurrSet;
-  DenseMap<FunctionDecl *, ExistingNumberSet *>::iterator I =
+  llvm::DenseMap<FunctionDecl *, ExistingNumberSet *>::iterator I =
     FunExistingVarsMap.find(CanonicalFD);
 
   if (I == FunExistingVarsMap.end()) {
@@ -273,7 +277,7 @@ RenameParam::~RenameParam(void)
   if (RenameVisitor)
     delete RenameVisitor;
 
-  for (DenseMap<FunctionDecl *, ExistingNumberSet *>::iterator 
+  for (llvm::DenseMap<FunctionDecl *, ExistingNumberSet *>::iterator 
         I = FunExistingVarsMap.begin(), E = FunExistingVarsMap.end();
         I != E; ++I) {
     delete (*I).second;

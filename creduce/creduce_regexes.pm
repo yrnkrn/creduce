@@ -1,6 +1,6 @@
 ## -*- mode: Perl -*-
 ##
-## Copyright (c) 2012, 2013 The University of Utah
+## Copyright (c) 2012, 2013, 2015 The University of Utah
 ## All rights reserved.
 ##
 ## This file is distributed under the University of Illinois Open Source
@@ -78,6 +78,7 @@ $call = "$varnum\\s*$RE{balanced}{-parens=>'()'}";
 @delimited_regexes_to_replace = (
     ["($varnumexp)\\s*:", ""],
     ["goto\\s+($varnum);", ""],
+    ["class", "struct"],
     ["char", "int"],
     ["short", "int"],
     ["long", "int"],

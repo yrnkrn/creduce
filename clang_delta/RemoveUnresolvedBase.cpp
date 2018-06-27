@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2013 The University of Utah
+// Copyright (c) 2012, 2013, 2015, 2017 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -20,7 +20,6 @@
 #include "TransformationManager.h"
 
 using namespace clang;
-using namespace llvm;
 
 static const char *DescriptionMsg = 
 "This pass tries to remove a base specifier if we cannot \
@@ -45,7 +44,7 @@ private:
 
 bool RemoveUnresolvedBaseASTVisitor::VisitCXXRecordDecl(CXXRecordDecl *CXXRD)
 {
-  if (!CXXRD->hasDefinition())
+  if (ConsumerInstance->isInIncludedFile(CXXRD) || !CXXRD->hasDefinition())
     return true;
 
   const CXXRecordDecl *CanonicalRD = CXXRD->getCanonicalDecl();
@@ -84,7 +83,8 @@ void RemoveUnresolvedBase::Initialize(ASTContext &context)
 
 void RemoveUnresolvedBase::HandleTranslationUnit(ASTContext &Ctx)
 {
-  if (TransformationManager::isCLangOpt()) {
+  if (TransformationManager::isCLangOpt() ||
+      TransformationManager::isOpenCLLangOpt()) {
     ValidInstanceNum = 0;
   }
   else {

@@ -1,6 +1,6 @@
 ## -*- mode: Perl -*-
 ##
-## Copyright (c) 2012 The University of Utah
+## Copyright (c) 2012, 2015, 2016 The University of Utah
 ## All rights reserved.
 ##
 ## This file is distributed under the University of Illinois Open Source
@@ -12,6 +12,7 @@ package pass_ints;
 
 use strict;
 use warnings;
+no warnings 'portable';
 
 use creduce_regexes;
 use creduce_utils;
@@ -41,7 +42,7 @@ sub transform ($$$) {
 
     $replace_cont = -1;
     $matched = 0;
-    
+
     # need some abstraction over the number patterns...
 
     if (0) {

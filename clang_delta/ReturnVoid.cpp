@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2013, 2014 The University of Utah
+// Copyright (c) 2012, 2013, 2014, 2015 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -67,6 +67,9 @@ private:
 
 bool RVCollectionVisitor::VisitFunctionDecl(FunctionDecl *FD)
 {
+  if (ConsumerInstance->isInIncludedFile(FD))
+    return true;
+
   FunctionDecl *CanonicalDecl = FD->getCanonicalDecl();
   if (ConsumerInstance->isNonVoidReturnFunction(CanonicalDecl)) {
     ConsumerInstance->ValidInstanceNum++;

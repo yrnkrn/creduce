@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2013, 2014 The University of Utah
+// Copyright (c) 2012, 2013, 2014, 2015, 2016, 2017 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -24,7 +24,6 @@
 #include "TransformationManager.h"
 
 using namespace clang;
-using namespace llvm;
 
 static const char *DescriptionMsg =
 "Replace an empty struct with type of int. A struct is defined to be empty if \
@@ -77,7 +76,8 @@ private:
 
 bool EmptyStructToIntASTVisitor::VisitRecordDecl(RecordDecl *RD)
 {
-  if (!ConsumerInstance->isValidRecordDecl(RD))
+  if (ConsumerInstance->isInIncludedFile(RD) ||
+      !ConsumerInstance->isValidRecordDecl(RD))
     return true;
  
   const RecordDecl *CanonicalRD = dyn_cast<RecordDecl>(RD->getCanonicalDecl());
@@ -350,7 +350,7 @@ void EmptyStructToInt::removeRecordDecls(void)
     if (SemiLoc.isInvalid()) {
       if (!RD->isThisDeclarationADefinition())
         return;
-      SourceLocation RBLoc = RD->getRBraceLoc();
+      SourceLocation RBLoc = RD->getBraceRange().getEnd();
       if (RBLoc.isInvalid())
         return;
       RewriteHelper->removeTextFromLeftAt(SourceRange(RBLoc, RBLoc),
@@ -468,12 +468,14 @@ const RecordDecl *EmptyStructToInt::getBaseRecordDef(const Type *Ty)
 }
 
 void EmptyStructToInt::getInitExprs(const Type *Ty, 
-                                           const Expr *E,
-                                           const IndexVector *IdxVec,
-                                           ExprVector &InitExprs)
+                                    const Expr *E,
+                                    const IndexVector *IdxVec,
+                                    ExprVector &InitExprs)
 {
   const ArrayType *ArrayTy = dyn_cast<ArrayType>(Ty);
   if (ArrayTy) {
+    if (isa<ImplicitValueInitExpr>(E) || isa<CXXConstructExpr>(E))
+      return;
     const InitListExpr *ILE = dyn_cast<InitListExpr>(E);
     TransAssert(ILE && "Invalid array initializer!");
     unsigned int NumInits = ILE->getNumInits();
@@ -507,7 +509,8 @@ void EmptyStructToInt::getInitExprs(const Type *Ty,
     InitExprs.push_back(E);
   }
   else {
-    for (IndexVector::const_iterator FI = IdxVec->begin(), FE = IdxVec->end(); FI != FE; ++FI) {
+    for (IndexVector::const_iterator FI = IdxVec->begin(), FE = IdxVec->end();
+         FI != FE; ++FI) {
       const FieldDecl *FD = getFieldDeclByIdx(RD, (*FI));
       TransAssert(FD && "NULL FieldDecl!");
 
@@ -527,7 +530,8 @@ void EmptyStructToInt::getInitExprs(const Type *Ty,
         return;
       }
 
-      getInitExprs(Ty, ILE->getInit(InitListIdx), RecordDeclToField[BaseRD], InitExprs);
+      getInitExprs(Ty, ILE->getInit(InitListIdx),
+                   RecordDeclToField[BaseRD], InitExprs);
     }
   }
 }

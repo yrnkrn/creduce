@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2014 The University of Utah
+// Copyright (c) 2012, 2014, 2016 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -59,11 +59,9 @@ private:
 
   virtual void HandleTranslationUnit(clang::ASTContext &Ctx);
 
-  bool addNewTmpVariable(clang::ASTContext &ASTCtx);
+  void getNewTmpVariableStr(clang::ASTContext &ASTCtx, std::string &VarStr);
 
-  bool addNewAssignStmt(void);
-
-  bool replaceCallExpr(void);
+  void addNewTmpVariable(clang::ASTContext &ASTCtx);
 
   bool isInvalidOperator(const clang::CXXOperatorCallExpr *OpE);
 
@@ -79,9 +77,9 @@ private:
          std::string &VarStr,
          const clang::TemplateSpecializationType *TST);
 
-  bool writeNewTmpVariable(const clang::QualType &QT, std::string &VarStr);
+  void getNewTmpVariable(const clang::QualType &QT, std::string &VarStr);
 
-  bool writeNewIntTmpVariable(std::string &VarStr);
+  void getNewIntTmpVariable(std::string &VarStr);
 
   clang::SmallVector<clang::CallExpr *, 5> CallExprQueue;
 

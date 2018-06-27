@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2013 The University of Utah
+// Copyright (c) 2012, 2013, 2015, 2016 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -76,7 +76,8 @@ private:
 
 bool AssignExprCollectionVisitor::VisitFunctionDecl(FunctionDecl *FD)
 {
-  if (!FD->isThisDeclarationADefinition())
+  if (!FD->isThisDeclarationADefinition() ||
+      ConsumerInstance->isInIncludedFile(FD))
     return true;
 
   ConsumerInstance->StmtVisitor->setCurrentFunctionDecl(FD);
@@ -168,7 +169,8 @@ bool AssignExprStatementVisitor::VisitCallExpr(CallExpr *CallE)
 {
   for (CallExpr::arg_iterator I = CallE->arg_begin(),
        E = CallE->arg_end(); I != E; ++I) {
-    handleSubExpr(*I);
+    Expr *Exp = *I;
+    handleSubExpr(Exp);
   }
   return false;
 }

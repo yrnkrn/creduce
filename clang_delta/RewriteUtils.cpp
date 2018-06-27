@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2013, 2014 The University of Utah
+// Copyright (c) 2012, 2013, 2014, 2015, 2016, 2017, 2018 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -26,7 +26,6 @@
 #include "clang/AST/ExprCXX.h"
 
 using namespace clang;
-using namespace llvm;
 
 static const char *DefaultIndentStr = "    ";
 
@@ -91,9 +90,15 @@ SourceLocation RewriteUtils::getEndLocationFromBegin(SourceRange Range)
   if (EndLoc.isInvalid())
     return EndLoc;
 
-  int LocRangeSize = TheRewriter->getRangeSize(Range);
+  if (StartLoc.isMacroID())
+    StartLoc = SrcManager->getFileLoc(StartLoc);
+  if (EndLoc.isMacroID())
+    EndLoc = SrcManager->getFileLoc(EndLoc);
+
+  SourceRange NewRange(StartLoc, EndLoc);
+  int LocRangeSize = TheRewriter->getRangeSize(NewRange);
   if (LocRangeSize == -1)
-    return Range.getEnd();
+    return NewRange.getEnd();
 
   return StartLoc.getLocWithOffset(LocRangeSize);
 }
@@ -196,9 +201,22 @@ bool RewriteUtils::removeParamFromFuncDecl(const ParmVarDecl *PV,
   int RangeSize;
  
   SourceLocation StartLoc = ParamLocRange.getBegin();
-  if (StartLoc.isInvalid()) {
-    StartLoc = ParamLocRange.getEnd();
+  SourceLocation EndLoc = ParamLocRange.getEnd();
+  if (StartLoc.isInvalid() && EndLoc.isInvalid()) {
+    return false;
+  }
+  else if (StartLoc.isInvalid()) {
+    StartLoc = EndLoc;
     RangeSize = PV->getNameAsString().size();
+  }
+  else if (EndLoc.isInvalid()) {
+    const char *Buf = SrcManager->getCharacterData(StartLoc);
+    if ((ParamPos == 0) && (NumParams == 1)) {
+      RangeSize = getOffsetUntil(Buf, ')');
+    }
+    else {
+      RangeSize = getOffsetUntil(Buf, ',');
+    }
   }
   else {
     RangeSize = TheRewriter->getRangeSize(ParamLocRange);
@@ -209,13 +227,8 @@ bool RewriteUtils::removeParamFromFuncDecl(const ParmVarDecl *PV,
   // The param is the only parameter of the function declaration.
   // Replace it with void
   if ((ParamPos == 0) && (NumParams == 1)) {
-    // Note that ')' is included in ParamLocRange for unnamed parameter
-    if (PV->getDeclName())
-      return !(TheRewriter->ReplaceText(StartLoc,
-                                        RangeSize, "void"));
-    else
-      return !(TheRewriter->ReplaceText(StartLoc,
-                                        RangeSize - 1, "void"));
+    return !(TheRewriter->ReplaceText(StartLoc,
+                                      RangeSize, "void"));
   }
 
   // The param is the last parameter
@@ -232,52 +245,34 @@ bool RewriteUtils::removeParamFromFuncDecl(const ParmVarDecl *PV,
 
     SourceLocation NewStartLoc = StartLoc.getLocWithOffset(Offset);
 
-    // Note that ')' is included in ParamLocRange for unnamed parameter
-    // Also note that C++ supports unnamed parameters with default values,
-    // i.e., foo(int x, int = 0);
-    // PV->hasDefaultArg() is to handle this special case
-    if (PV->getDeclName() || PV->hasDefaultArg())
-      return !(TheRewriter->RemoveText(NewStartLoc, 
-                                       RangeSize - Offset));
-    else
-      return !(TheRewriter->RemoveText(NewStartLoc, 
-                                       RangeSize - Offset - 1));
+    return !(TheRewriter->RemoveText(NewStartLoc, RangeSize - Offset));
   }
  
-  // Clang gives inconsistent RangeSize for named and unnamed parameter decls.
-  // For example, for the first parameter, 
-  //   foo(int, int);  -- RangeSize is 4, i.e., "," is counted
-  //   foo(int x, int);  -- RangeSize is 5, i.e., ","is not included
-  if (PV->getDeclName()) {
-    // We cannot use the code below:
-    //   SourceLocation EndLoc = ParamLocRange.getEnd();
-    //   const char *EndBuf = 
-    //     ConsumerInstance->SrcManager->getCharacterData(EndLoc);
-    // Because getEnd() returns the start of the last token if this
-    // is a token range. For example, in the above example, 
-    // getEnd() points to the start of "x"
-    // See the comments on getRangeSize in clang/lib/Rewriter/Rewriter.cpp
-    int NewRangeSize = 0;
-    const char *StartBuf = 
-      SrcManager->getCharacterData(StartLoc);
+  // We cannot use the code below:
+  //   SourceLocation EndLoc = ParamLocRange.getEnd();
+  //   const char *EndBuf =
+  //     ConsumerInstance->SrcManager->getCharacterData(EndLoc);
+  // Because getEnd() returns the start of the last token if this
+  // is a token range. For example, in the above example,
+  // getEnd() points to the start of "x"
+  // See the comments on getRangeSize in clang/lib/Rewriter/Rewriter.cpp
+  int NewRangeSize = 0;
+  const char *StartBuf = SrcManager->getCharacterData(StartLoc);
 
-    while (NewRangeSize < RangeSize) {
-      StartBuf++;
-      NewRangeSize++;
-    }
-
-    TransAssert(StartBuf && "Invalid start buffer!");
-    while (*StartBuf != ',') {
-      StartBuf++;
-      NewRangeSize++;
-    }
-
-    return !(TheRewriter->RemoveText(StartLoc, 
-                                     NewRangeSize + 1));
+  while (NewRangeSize < RangeSize) {
+    StartBuf++;
+    NewRangeSize++;
   }
-  else {
-    return !(TheRewriter->RemoveText(StartLoc, RangeSize));
+
+  TransAssert(StartBuf && "Invalid start buffer!");
+  // FIXME: This isn't really correct for processing old-style function
+  // declarations, but just let's live with it for now.
+  while (*StartBuf != ',' && *StartBuf != ';') {
+    StartBuf++;
+    NewRangeSize++;
   }
+
+  return !(TheRewriter->RemoveText(StartLoc, NewRangeSize + 1));
 }
 
 // Handle CXXConstructExpr and CallExpr.
@@ -523,7 +518,8 @@ SourceLocation RewriteUtils::getVarDeclTypeLocEnd(const VarDecl *VD)
 bool RewriteUtils::removeVarFromDeclStmt(DeclStmt *DS,
                                          const VarDecl *VD,
                                          Decl *PrevDecl,
-                                         bool IsFirstDecl)
+                                         bool IsFirstDecl,
+                                         bool *StmtRemoved)
 {
   SourceRange StmtRange = DS->getSourceRange();
 
@@ -543,8 +539,11 @@ bool RewriteUtils::removeVarFromDeclStmt(DeclStmt *DS,
     if ( RecordDecl *RD = dyn_cast<RecordDecl>(PrevDecl) ) {
       DeclGroup DGroup = DS->getDeclGroup().getDeclGroup();
       IsFirstDecl = true;
-      if (!RD->getDefinition() && DGroup.size() == 2)
+      if ((!RD->getDefinition() || RD->getNameAsString() == "") &&
+          DGroup.size() == 2) {
+        *StmtRemoved = true;
         return !(TheRewriter->RemoveText(StmtRange));
+      }
     }
   }
 
@@ -560,8 +559,17 @@ bool RewriteUtils::removeVarFromDeclStmt(DeclStmt *DS,
     // transformation like:
     //   int * *y;
     SourceLocation NewStartLoc = getVarDeclTypeLocEnd(VD);
+    if (NewStartLoc.isMacroID()) {
+      NewStartLoc = SrcManager->getSpellingLoc(NewStartLoc);
+      const char *StartBuf = SrcManager->getCharacterData(NewStartLoc);
+      // Make sure we have at least one space before the name.
+      if (*StartBuf == ' ')
+        NewStartLoc = NewStartLoc.getLocWithOffset(1);
+    }
 
     SourceLocation NewEndLoc = getEndLocationUntil(VarRange, ',');
+    if (NewEndLoc.isMacroID())
+      NewEndLoc = SrcManager->getSpellingLoc(NewEndLoc);
     
     return 
       !(TheRewriter->RemoveText(SourceRange(NewStartLoc, NewEndLoc)));
@@ -573,6 +581,10 @@ bool RewriteUtils::removeVarFromDeclStmt(DeclStmt *DS,
 
   SourceLocation PrevDeclEndLoc = getEndLocationUntil(PrevDeclRange, ',');
 
+  if (VarEndLoc.isMacroID())
+    VarEndLoc = SrcManager->getSpellingLoc(VarEndLoc);
+  if (PrevDeclEndLoc.isMacroID())
+    PrevDeclEndLoc = SrcManager->getSpellingLoc(PrevDeclEndLoc);
   return !(TheRewriter->RemoveText(SourceRange(PrevDeclEndLoc, VarEndLoc)));
 }
 
@@ -580,12 +592,25 @@ bool RewriteUtils::getExprString(const Expr *E,
                                  std::string &ES)
 {
   SourceRange ExprRange = E->getSourceRange();
-   
-  int RangeSize = TheRewriter->getRangeSize(ExprRange);
-  if (RangeSize == -1)
-    return false;
-
   SourceLocation StartLoc = ExprRange.getBegin();
+  if (StartLoc.isInvalid() && !StartLoc.isMacroID()) {
+    ES = "<invalid-expr>";
+    return false;
+  }
+
+  int RangeSize = TheRewriter->getRangeSize(ExprRange);
+  if (RangeSize == -1) {
+    if (StartLoc.isMacroID()) {
+      StartLoc = SrcManager->getFileLoc(StartLoc);
+      SourceLocation EndLoc = SrcManager->getFileLoc(ExprRange.getEnd());
+      RangeSize = TheRewriter->getRangeSize(SourceRange(StartLoc, EndLoc));
+    }
+    else {
+      ES = "<invalid-expr>";
+      return false;
+    }
+  }
+
   const char *StartBuf = SrcManager->getCharacterData(StartLoc);
 
   ES.assign(StartBuf, RangeSize);
@@ -642,14 +667,13 @@ bool RewriteUtils::replaceExpr(const Expr *E,
       return false;
     StartLoc = SrcManager->getFileLoc(StartLoc);
     SourceLocation EndLoc = ExprRange.getEnd();
-    if (!SrcManager->isMacroBodyExpansion(EndLoc))
-      return false;
-
-    // FIXME: handle cases below:
-    // #define macro bar(1,2);
-    // int bar(int p1, int p2) { return p1 + p2; }
-    // void foo(void) { int x = macro }
-    EndLoc = getExpansionEndLoc(EndLoc);
+    if (SrcManager->isMacroBodyExpansion(EndLoc)) {
+      // FIXME: handle cases below:
+      // #define macro bar(1,2);
+      // int bar(int p1, int p2) { return p1 + p2; }
+      // void foo(void) { int x = macro }
+      EndLoc = getExpansionEndLoc(EndLoc);
+    }
     return !(TheRewriter->ReplaceText(SourceRange(StartLoc, EndLoc), ES));
   }
 
@@ -753,6 +777,9 @@ bool RewriteUtils::addNewAssignStmtBefore(Stmt *BeforeStmt,
   }
 
   SourceLocation StmtLocStart = BeforeStmt->getLocStart();
+  if (StmtLocStart.isMacroID()) {
+    StmtLocStart = SrcManager->getFileLoc(StmtLocStart);
+  }
 
   std::string ExprStr;
   RewriteUtils::getExprString(RHS, ExprStr);
@@ -788,26 +815,22 @@ void RewriteUtils::indentAfterNewLine(StringRef Str,
   }
 }
 
-bool RewriteUtils::addStringBeforeStmt(Stmt *BeforeStmt,
+void RewriteUtils::addOpenParenBeforeStmt(Stmt *S, const std::string &IndentStr)
+{
+  SourceRange StmtRange = S->getSourceRange();
+  SourceLocation LocEnd =
+    RewriteUtils::getEndLocationFromBegin(StmtRange);
+  TransAssert(LocEnd.isValid() && "Invalid LocEnd!");
+
+  std::string PostStr = "\n" + IndentStr + "}";
+  TheRewriter->InsertTextAfterToken(LocEnd, PostStr);
+}
+
+bool RewriteUtils::addStringBeforeStmtInternal(Stmt *S,
                                    const std::string &Str,
+                                   const std::string &IndentStr,
                                    bool NeedParen)
 {
-  std::string IndentStr = 
-    RewriteUtils::getStmtIndentString(BeforeStmt, SrcManager);
-
-  if (NeedParen) {
-    SourceRange StmtRange = BeforeStmt->getSourceRange();
-    SourceLocation LocEnd = 
-      RewriteUtils::getEndLocationFromBegin(StmtRange);
-    TransAssert(LocEnd.isValid() && "Invalid LocEnd!");
-
-    std::string PostStr = "\n" + IndentStr + "}";
-    if (TheRewriter->InsertTextAfterToken(LocEnd, PostStr))
-      return false;
-  }
-
-  SourceLocation StmtLocStart = BeforeStmt->getLocStart();
-
   std::string NewStr;
 
   if (NeedParen) {
@@ -818,8 +841,42 @@ bool RewriteUtils::addStringBeforeStmt(Stmt *BeforeStmt,
   
   std::string IndentedStr;
   indentAfterNewLine(NewStr, IndentedStr, IndentStr);
-  return !(TheRewriter->InsertText(StmtLocStart, 
-             IndentedStr, /*InsertAfter=*/false));
+
+  return !(TheRewriter->InsertText(S->getLocStart(), 
+           IndentedStr, /*InsertAfter=*/false));
+}
+
+bool RewriteUtils::addStringBeforeStmt(Stmt *BeforeStmt,
+                                   const std::string &Str,
+                                   bool NeedParen)
+{
+  std::string IndentStr =
+    RewriteUtils::getStmtIndentString(BeforeStmt, SrcManager);
+
+  if (NeedParen) {
+    addOpenParenBeforeStmt(BeforeStmt, IndentStr);
+  }
+  return addStringBeforeStmtInternal(BeforeStmt, Str,
+                                     IndentStr, NeedParen);
+}
+
+// Note that we can't use addStringBeforeStmt because
+// we need to modify an expression in BeforeStmt. We have
+// to do rewrite from end to begin to avoid crash.
+bool RewriteUtils::addStringBeforeStmtAndReplaceExpr(Stmt *BeforeStmt,
+                                   const std::string &StmtStr,
+                                   const Expr *E, const std::string &ExprStr,
+                                   bool NeedParen)
+{
+  std::string IndentStr =
+    RewriteUtils::getStmtIndentString(BeforeStmt, SrcManager);
+
+  if (NeedParen) {
+    addOpenParenBeforeStmt(BeforeStmt, IndentStr);
+  }
+  replaceExpr(E, ExprStr);
+  return addStringBeforeStmtInternal(BeforeStmt, StmtStr,
+                                     IndentStr, NeedParen);
 }
 
 bool RewriteUtils::addStringAfterStmt(Stmt *AfterStmt, 
@@ -868,6 +925,13 @@ bool RewriteUtils::replaceNamedDeclName(const NamedDecl *ND,
   SourceLocation NameLocStart = ND->getLocation();
   return !(TheRewriter->ReplaceText(NameLocStart, 
              ND->getNameAsString().size(), NameStr));
+}
+
+bool RewriteUtils::replaceValueDecl(const ValueDecl *VD, const std::string &Str)
+{
+  SourceRange Range = VD->getSourceRange();
+  unsigned RangeSize = TheRewriter->getRangeSize(Range);
+  return !(TheRewriter->ReplaceText(Range.getBegin(), RangeSize, Str));
 }
 
 bool RewriteUtils::replaceVarDeclName(VarDecl *VD,
@@ -1050,6 +1114,8 @@ bool RewriteUtils::getDeclGroupStrAndRemove(DeclGroupRef DGR,
     // transformation like:
     //   int *x, y;
     SourceLocation TypeLocEnd = getVarDeclTypeLocEnd(VD);
+    if (TypeLocEnd.isMacroID())
+      TypeLocEnd = SrcManager->getFileLoc(TypeLocEnd);
     SourceRange VarRange = VD->getSourceRange();
 
     SourceLocation LocEnd = getEndLocationUntil(VarRange, ';');
@@ -1057,6 +1123,8 @@ bool RewriteUtils::getDeclGroupStrAndRemove(DeclGroupRef DGR,
     getStringBetweenLocs(Str, TypeLocEnd, LocEnd);
 
     SourceLocation StartLoc = VarRange.getBegin();
+    if (StartLoc.isMacroID())
+      StartLoc = SrcManager->getFileLoc(StartLoc);
     SourceLocation NewEndLoc = getLocationAfterSkiping(LocEnd, ';');
     return !(TheRewriter->RemoveText(SourceRange(StartLoc, NewEndLoc)));
   }
@@ -1260,22 +1328,21 @@ bool RewriteUtils::removeVarDecl(const VarDecl *VD,
     return !(TheRewriter->RemoveText(SourceRange(StartLoc, EndLoc)));
   }
 
-  const VarDecl *PrevVD = FirstVD;
+  const Decl *PrevDecl = FirstVD;
   const VarDecl *CurrVD = NULL;
   ++I;
   DeclGroupRef::const_iterator E = DGR.end();
   for (; I != E; ++I) {
     CurrVD = dyn_cast<VarDecl>(*I);
-    TransAssert(CurrVD && "Not a valid VarDecl!");
-    if (VD == CurrVD)
+    if (CurrVD && VD == CurrVD)
       break;
-    PrevVD = CurrVD;
+    PrevDecl = *I;
   }
 
   TransAssert((VD == CurrVD) && "Cannot find VD!");
 
   SourceLocation VarEndLoc = VarRange.getEnd();
-  SourceRange PrevDeclRange = PrevVD->getSourceRange();
+  SourceRange PrevDeclRange = PrevDecl->getSourceRange();
 
   SourceLocation PrevDeclEndLoc = 
     getEndLocationUntil(PrevDeclRange, ',');
@@ -1469,9 +1536,21 @@ bool RewriteUtils::replaceCXXDtorCallExpr(const CXXMemberCallExpr *CE,
   return !(TheRewriter->ReplaceText(StartLoc, OldDtorName.size(), Name));
 }
 
+SourceRange RewriteUtils::getFileLocSourceRange(SourceRange LocRange)
+{
+  SourceLocation StartLoc = LocRange.getBegin();
+  if (StartLoc.isMacroID()) {
+    StartLoc = SrcManager->getSpellingLoc(StartLoc);
+    SourceLocation EndLoc = LocRange.getEnd();
+    TransAssert(EndLoc.isMacroID() && "EndLoc is not from a macro!");
+    LocRange = SourceRange(StartLoc, SrcManager->getSpellingLoc(EndLoc));
+  }
+  return LocRange;
+}
+
 bool RewriteUtils::removeSpecifier(NestedNameSpecifierLoc Loc)
 {
-  SourceRange LocRange = Loc.getLocalSourceRange();
+  SourceRange LocRange = getFileLocSourceRange(Loc.getLocalSourceRange());
   TransAssert((TheRewriter->getRangeSize(LocRange) != -1) && 
               "Bad NestedNameSpecifierLoc Range!");
   return !(TheRewriter->RemoveText(LocRange));
@@ -1480,7 +1559,7 @@ bool RewriteUtils::removeSpecifier(NestedNameSpecifierLoc Loc)
 bool RewriteUtils::replaceSpecifier(NestedNameSpecifierLoc Loc,
                                     const std::string &Name)
 {
-  SourceRange LocRange = Loc.getLocalSourceRange();
+  SourceRange LocRange = getFileLocSourceRange(Loc.getLocalSourceRange());
   TransAssert((TheRewriter->getRangeSize(LocRange) != -1) && 
               "Bad NestedNameSpecifierLoc Range!");
   return !(TheRewriter->ReplaceText(LocRange, Name + "::"));
@@ -1517,6 +1596,9 @@ bool RewriteUtils::replaceRecordType(RecordTypeLoc &RTLoc,
                                      const std::string &Name)
 {
   const IdentifierInfo *TypeId = RTLoc.getType().getBaseTypeIdentifier();
+  if (!TypeId)
+    return true;
+
   SourceLocation LocStart = RTLoc.getLocStart();
 
   // Loc could be invalid, for example:
@@ -1684,7 +1766,7 @@ bool RewriteUtils::removeClassDecls(const CXXRecordDecl *CXXRD)
     SourceRange Range = (*I)->getSourceRange();
     SourceLocation LocEnd;
     if ((*I)->isThisDeclarationADefinition()) {
-      LocEnd = (*I)->getRBraceLoc();
+      LocEnd = (*I)->getBraceRange().getEnd();
       if (LocEnd.isValid())
         LocEnd = getLocationUntil(LocEnd, ';');
       else
@@ -1709,7 +1791,7 @@ bool RewriteUtils::removeClassTemplateDecls(const ClassTemplateDecl *TmplD)
     SourceRange Range = (*I)->getSourceRange();
     SourceLocation LocEnd;
     if (CXXRD->isThisDeclarationADefinition()) {
-      LocEnd = CXXRD->getRBraceLoc();
+      LocEnd = CXXRD->getBraceRange().getEnd();
       LocEnd = getLocationUntil(LocEnd, ';');
     }
     else {

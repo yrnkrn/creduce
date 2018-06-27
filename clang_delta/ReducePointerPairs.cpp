@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2013, 2014 The University of Utah
+// Copyright (c) 2012, 2013, 2014, 2015, 2017 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -21,7 +21,6 @@
 #include "TransformationManager.h"
 
 using namespace clang;
-using namespace llvm;
 
 static const char *DescriptionMsg =
 "Reduce a pair of pointers at the same time if they have the following shape:\n\
@@ -289,7 +288,7 @@ void ReducePointerPairs::doRewriting(const VarDecl *VD)
 
 bool ReducePointerPairs::isValidVD(const VarDecl *VD)
 {
-  if (dyn_cast<ParmVarDecl>(VD))
+  if (isInIncludedFile(VD) || dyn_cast<ParmVarDecl>(VD))
     return false;
 
   const Type *Ty = VD->getType().getTypePtr();

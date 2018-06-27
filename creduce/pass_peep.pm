@@ -1,6 +1,6 @@
 ## -*- mode: Perl -*-
 ##
-## Copyright (c) 2012 The University of Utah
+## Copyright (c) 2012, 2015, 2016 The University of Utah
 ## All rights reserved.
 ##
 ## This file is distributed under the University of Illinois Open Source
@@ -18,6 +18,8 @@ use warnings;
 
 use creduce_regexes;
 use creduce_utils;
+
+use Regexp::Common;
 use re 'eval';
 
 sub check_prereqs () {
@@ -63,6 +65,8 @@ sub advance ($$$) {
 	$lim = scalar (@regexes_to_replace);
     } elsif ($which eq "b") {
 	$lim = scalar (@delimited_regexes_to_replace);
+    } elsif ($which eq "c") {
+        $lim = 1;
     } else {
 	die;
     }
@@ -70,7 +74,7 @@ sub advance ($$$) {
     if ($sh{"index2"} >= $lim) {
 	$sh{"index2"} = 0;
 	$sh{"index"}++;
-    } 
+    }
     return \%sh;
 }
 
@@ -82,9 +86,9 @@ sub transform ($$$) {
     my $prog2 = $prog;
 
     while (1) {
-	
+
 	return ($STOP, \%sh) if ($sh{"index"} > length ($prog));
-	
+
 	if (0) {
 	} elsif ($which eq "a") {
 	    my $l = $regexes_to_replace[$sh{"index2"}];
@@ -117,7 +121,7 @@ sub transform ($$$) {
 	    } else {
 		$back = "(?<delim2>$borderorspc)";
 	    }
-	    
+
 	    # special cases to avoid infinite replacement loops
 	    goto out if ($repl eq "0" && $rest =~ /^($front)0$back/sm);
 	    goto out if ($repl eq "1" && $rest =~ /^($front)0$back/sm);
@@ -128,16 +132,32 @@ sub transform ($$$) {
 	    goto out if ($repl =~ /,\s*0/ && $rest =~ /^($front),\s*0$back/sm);
 	    goto out if ($repl =~ /,\s*1/ && $rest =~ /^($front),\s*0$back/sm);
 	    goto out if ($repl =~ /,\s*1/ && $rest =~ /^($front),\s*1$back/sm);
-	    
+
 	    if ($rest =~ s/^$front(?<str>$str)$back/$+{delim1}$repl$+{delim2}/sm) {
 		$prog2 = $first.$rest;
 		if ($prog ne $prog2) {
 		    write_file ($cfile, $prog2);
 		    return ($OK, \%sh);
-		} 
+		}
 	    }
+	} elsif ($which eq "c") {
+	  my $index = $sh{"index"};
+	  my $first = substr($prog2, 0, $index);
+	  my $rest = substr($prog2, $index);
+
+	  if ($rest =~ m/^while\s*$RE{balanced}{-parens=>'()'}\s*$RE{balanced}{-parens=>'{}'}/) {
+	    my $expr = $1;
+	    my $body = $2;
+	    my $remain = substr($rest, $+[0]);
+	    $body =~ s/break\s*;//g;
+	    $prog2 = $first.$body.$remain;
+	    if ($prog ne $prog2) {
+	      write_file ($cfile, $prog2);
+	      return ($OK, \%sh);
+	    }
+	  }
 	} else {
-	    die;
+	  die;
 	}
       out:
 	$state = advance($cfile, $which, \%sh);

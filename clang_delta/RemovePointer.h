@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012 The University of Utah
+// Copyright (c) 2012, 2016 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -13,6 +13,7 @@
 
 #include <utility>
 #include "Transformation.h"
+#include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallPtrSet.h"
 
 namespace clang {
@@ -40,6 +41,7 @@ public:
 private:
 
   typedef llvm::SmallPtrSet<const clang::VarDecl *, 10> VarDeclSet;
+  typedef llvm::SetVector<const clang::VarDecl *> VarDeclSetVector;
 
   virtual void Initialize(clang::ASTContext &context);
 
@@ -53,7 +55,7 @@ private:
 
   void invalidateOneVarDecl(const clang::DeclRefExpr *DRE);
 
-  VarDeclSet AllPointerVarDecls;
+  VarDeclSetVector AllPointerVarDecls;
 
   VarDeclSet AllInvalidPointerVarDecls;
 

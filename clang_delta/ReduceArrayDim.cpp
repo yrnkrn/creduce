@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2013 The University of Utah
+// Copyright (c) 2012, 2013, 2015, 2017 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -23,7 +23,6 @@
 #include "TransformationManager.h"
 
 using namespace clang;
-using namespace llvm;
 
 static const char *DescriptionMsg =
 "Reduce the dimension of an array. Each transformation iteration \
@@ -140,6 +139,9 @@ void ReduceArrayDim::HandleTranslationUnit(ASTContext &Ctx)
 
 void ReduceArrayDim::addOneVar(const VarDecl *VD)
 {
+  if (isInIncludedFile(VD))
+    return;
+
   const Type *Ty = VD->getType().getTypePtr();
   const ArrayType *ArrayTy = dyn_cast<ArrayType>(Ty);
   if (!ArrayTy)

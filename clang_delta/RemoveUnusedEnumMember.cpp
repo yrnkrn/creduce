@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2013 The University of Utah
+// Copyright (c) 2012, 2013, 2015, 2016 The University of Utah
 // Copyright (c) 2012 Konstantin Tokarev <annulen@yandex.ru>
 // All rights reserved.
 //
@@ -18,6 +18,7 @@
 #include <cctype>
 #include "clang/AST/RecursiveASTVisitor.h"
 #include "clang/AST/ASTContext.h"
+#include "clang/Lex/Lexer.h"
 #include "clang/Basic/SourceManager.h"
 
 #include "TransformationManager.h"
@@ -34,7 +35,8 @@ class RemoveUnusedEnumMemberAnalysisVisitor : public
   RecursiveASTVisitor<RemoveUnusedEnumMemberAnalysisVisitor> {
 public:
 
-  explicit RemoveUnusedEnumMemberAnalysisVisitor(RemoveUnusedEnumMember *Instance)
+  explicit RemoveUnusedEnumMemberAnalysisVisitor(
+             RemoveUnusedEnumMember *Instance)
     : ConsumerInstance(Instance)
   { }
 
@@ -47,22 +49,19 @@ private:
 
 bool RemoveUnusedEnumMemberAnalysisVisitor::VisitEnumDecl(EnumDecl *ED)
 {
-  if (ED != ED->getCanonicalDecl())
+  if (ConsumerInstance->isInIncludedFile(ED) || ED != ED->getCanonicalDecl())
     return true;
 
-  EnumDecl::enumerator_iterator Previous = ED->enumerator_begin();
-  for (EnumDecl::enumerator_iterator I = ED->enumerator_begin(), E = ED->enumerator_end();
-      I != E; ++I) {
+  for (EnumDecl::enumerator_iterator I = ED->enumerator_begin(),
+       E = ED->enumerator_end(); I != E; ++I) {
     if (!(*I)->isReferenced()) {
       ConsumerInstance->ValidInstanceNum++;
       if (ConsumerInstance->ValidInstanceNum ==
           ConsumerInstance->TransformationCounter) {
         ConsumerInstance->TheEnumIterator = I;
         ConsumerInstance->TheEnumDecl = ED;
-        ConsumerInstance->TheEnumIteratorPrevious = Previous;
       }
     }
-    Previous = I;
   }
   return true;
 }
@@ -98,22 +97,24 @@ void RemoveUnusedEnumMember::HandleTranslationUnit(ASTContext &Ctx)
 
 void RemoveUnusedEnumMember::removeEnumConstantDecl()
 {
-  EnumDecl::enumerator_iterator Next = TheEnumIterator;
-  ++Next;
-
-  EnumDecl::enumerator_iterator Previous = TheEnumIteratorPrevious;
-
-  if (TheEnumIterator == TheEnumDecl->enumerator_begin() && Next == TheEnumDecl->enumerator_end()) {
-    // There is no "," here
-    TheRewriter.RemoveText((*TheEnumIterator)->getSourceRange());
-  } else if (Next == TheEnumDecl->enumerator_end()) {
-    // Remove previous ","
-    TheRewriter.RemoveText(SourceRange((*Previous)->getLocEnd().getLocWithOffset(1), (*TheEnumIterator)->getLocEnd()));
+  SourceLocation StartLoc = (*TheEnumIterator)->getLocStart();
+  if (StartLoc.isMacroID()) {
+    std::pair<SourceLocation, SourceLocation> Locs =
+      SrcManager->getExpansionRange(StartLoc);
+    StartLoc = Locs.first;
   }
-  else {
-    // Remove next ","
-    TheRewriter.RemoveText(SourceRange((*TheEnumIterator)->getLocStart(), (*Next)->getLocStart().getLocWithOffset(-1)));
+  SourceLocation EndLoc = (*TheEnumIterator)->getLocEnd();
+  if (EndLoc.isMacroID()) {
+    std::pair<SourceLocation, SourceLocation> Locs =
+      SrcManager->getExpansionRange(EndLoc);
+    EndLoc = Locs.second;
   }
+  SourceLocation CommaLoc = Lexer::findLocationAfterToken(
+    EndLoc, tok::comma, *SrcManager, Context->getLangOpts(),
+    /*SkipTrailingWhitespaceAndNewLine=*/false);
+  if (CommaLoc.isValid())
+    EndLoc = CommaLoc;
+  TheRewriter.RemoveText(SourceRange(StartLoc, EndLoc));
 }
 
 RemoveUnusedEnumMember::~RemoveUnusedEnumMember()

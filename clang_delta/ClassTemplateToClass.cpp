@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2013, 2014 The University of Utah
+// Copyright (c) 2012, 2013, 2014, 2015, 2017 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -21,7 +21,6 @@
 #include "TransformationManager.h"
 
 using namespace clang;
-using namespace llvm;
 
 static const char *DescriptionMsg = 
 "Change a class template to a class if this class template: \n\
@@ -68,9 +67,9 @@ class TemplateParameterTypeVisitor : public
   RecursiveASTVisitor<TemplateParameterTypeVisitor> {
 
 public:
-  typedef SmallPtrSet<TemplateTypeParmDecl *, 8> TypeParmDeclSet;
+  typedef llvm::SmallPtrSet<TemplateTypeParmDecl *, 8> TypeParmDeclSet;
 
-  typedef SmallPtrSet<TemplateName *, 8> TemplateNameSet;
+  typedef llvm::SmallPtrSet<TemplateName *, 8> TemplateNameSet;
 
   ~TemplateParameterTypeVisitor(void) {
     for (TemplateNameSet::iterator I = TmplNames.begin(), E = TmplNames.end();
@@ -142,6 +141,9 @@ bool TemplateParameterTypeVisitor::isAUsedParameter(NamedDecl *ND)
 bool ClassTemplateToClassASTVisitor::VisitClassTemplateDecl(
        ClassTemplateDecl *D)
 {
+  if (ConsumerInstance->isInIncludedFile(D))
+    return true;
+
   ClassTemplateDecl *CanonicalD = D->getCanonicalDecl();
   if (ConsumerInstance->VisitedDecls.count(CanonicalD))
     return true;
@@ -203,7 +205,8 @@ void ClassTemplateToClass::Initialize(ASTContext &context)
 
 void ClassTemplateToClass::HandleTranslationUnit(ASTContext &Ctx)
 {
-  if (TransformationManager::isCLangOpt()) {
+  if (TransformationManager::isCLangOpt() ||
+      TransformationManager::isOpenCLLangOpt()) {
     ValidInstanceNum = 0;
   }
   else {
@@ -297,7 +300,7 @@ bool ClassTemplateToClass::hasUsedNameDecl(
   if (!PartialD->isCompleteDefinition())
     return false;
 
-  SmallPtrSet<NamedDecl *, 8> Params;
+  llvm::SmallPtrSet<NamedDecl *, 8> Params;
   TemplateParameterList *PartialTPList = PartialD->getTemplateParameters();
   for (unsigned PI = 0; PI < PartialTPList->size(); ++PI) {
     NamedDecl *ND = PartialTPList->getParam(PI);
@@ -320,7 +323,7 @@ bool ClassTemplateToClass::hasUsedNameDecl(
     ParamVisitor.TraverseDecl(*DI);
   }
 
-  for (SmallPtrSet<NamedDecl *, 8>::iterator I = Params.begin(), 
+  for (llvm::SmallPtrSet<NamedDecl *, 8>::iterator I = Params.begin(), 
        E = Params.end(); I != E; ++I) {
     if (ParamVisitor.isAUsedParameter(*I))
       return true;

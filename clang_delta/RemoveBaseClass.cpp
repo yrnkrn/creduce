@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2013, 2014 The University of Utah
+// Copyright (c) 2012, 2013, 2014, 2015, 2016, 2017 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -21,7 +21,6 @@
 #include "TransformationManager.h"
 
 using namespace clang;
-using namespace llvm;
 using namespace clang_delta_common_visitor;
 
 static const char *DescriptionMsg = 
@@ -82,7 +81,8 @@ void RemoveBaseClass::Initialize(ASTContext &context)
 
 void RemoveBaseClass::HandleTranslationUnit(ASTContext &Ctx)
 {
-  if (TransformationManager::isCLangOpt()) {
+  if (TransformationManager::isCLangOpt() ||
+      TransformationManager::isOpenCLLangOpt()) {
     ValidInstanceNum = 0;
   }
   else {
@@ -152,6 +152,8 @@ void RemoveBaseClass::handleOneCXXRecordDecl(const CXXRecordDecl *CXXRD)
           continue;
       }
 
+      if (isInIncludedFile(*I))
+        continue;
       if (isDirectlyDerivedFrom(CanonicalRD, *I)) {
         Base = (*I);
         ValidInstanceNum++;
@@ -204,9 +206,8 @@ void RemoveBaseClass::copyBaseClassDecls(void)
 {
   if (!getNumExplicitDecls(TheBaseClass))
     return;
-  SourceLocation StartLoc = 
-    RewriteHelper->getLocationAfter(TheBaseClass->getLocation(), '{');
-  SourceLocation EndLoc = TheBaseClass->getRBraceLoc();
+  SourceLocation StartLoc = TheBaseClass->getBraceRange().getBegin();
+  SourceLocation EndLoc = TheBaseClass->getBraceRange().getEnd();
   TransAssert(EndLoc.isValid() && "Invalid RBraceLoc!");
   EndLoc = EndLoc.getLocWithOffset(-1);
 
@@ -214,7 +215,7 @@ void RemoveBaseClass::copyBaseClassDecls(void)
     TheRewriter.getRewrittenText(SourceRange(StartLoc, EndLoc));
 
   TransAssert(!DeclsStr.empty() && "Empty DeclsStr!");
-  SourceLocation InsertLoc = TheDerivedClass->getRBraceLoc();
+  SourceLocation InsertLoc = TheDerivedClass->getBraceRange().getEnd();
   TheRewriter.InsertTextBefore(InsertLoc, DeclsStr);
 }
 

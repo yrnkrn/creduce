@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2013 The University of Utah
+// Copyright (c) 2012, 2013, 2015 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -65,7 +65,7 @@ private:
 
 bool ReplaceUndefFuncCollectionVisitor::VisitFunctionDecl(FunctionDecl *FD)
 {
-  if (FD->hasBody())
+  if (ConsumerInstance->isInIncludedFile(FD) || FD->hasBody())
     return true;
   ConsumerInstance->handleOneFunctionDecl(FD->getCanonicalDecl());
 

@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2013 The University of Utah
+// Copyright (c) 2012, 2013, 2015, 2017 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -23,7 +23,6 @@
 #include "TransformationManager.h"
 
 using namespace clang;
-using namespace llvm;
 
 static const char *DescriptionMsg =
 "Simplify a call expression to a comma expression. \
@@ -65,6 +64,9 @@ private:
 
 bool SimplifyCallExprVisitor::VisitCallExpr(CallExpr *CE)
 {
+  if (ConsumerInstance->isInIncludedFile(CE))
+    return true;
+
   ConsumerInstance->ValidInstanceNum++;
   if (ConsumerInstance->TransformationCounter != 
       ConsumerInstance->ValidInstanceNum)

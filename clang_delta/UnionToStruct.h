@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012 The University of Utah
+// Copyright (c) 2012, 2016 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -12,6 +12,7 @@
 #define UNION_TO_STRUCT_H
 
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "Transformation.h"
 
@@ -52,7 +53,7 @@ private:
   typedef llvm::DenseMap<const clang::VarDecl *, clang::DeclGroupRef> 
             VarToDeclGroupMap;
 
-  typedef llvm::DenseMap<const clang::RecordDecl *, DeclaratorDeclSet *> 
+  typedef llvm::MapVector<const clang::RecordDecl *, DeclaratorDeclSet *> 
             RecordDeclToDeclaratorDeclMap;
 
   virtual void Initialize(clang::ASTContext &context);

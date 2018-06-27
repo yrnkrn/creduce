@@ -1,6 +1,6 @@
 ## -*- mode: Autoconf -*-
 ##
-## Copyright (c) 2012, 2013, 2014, 2015 The University of Utah
+## Copyright (c) 2012, 2013, 2014, 2015, 2016, 2017, 2018 The University of Utah
 ## All rights reserved.
 ##
 ## This file is distributed under the University of Illinois Open Source
@@ -37,7 +37,8 @@ AM_PROG_CC_C_O
 AC_PROG_CXX
 AC_PROG_LIBTOOL
 
-AX_LLVM([3.6],[engine])
+AX_LLVM([6.0],[engine])
+AX_CLANG
 
 # Handle configure-time choice of assertion-checking method.
 #
@@ -56,12 +57,13 @@ AS_IF([test "x$enable_trans_assert" = "xyes"],
 # `-fno-strict-aliasing' quiets many warnings about LLVM headers and possibly
 #   improves our chances at working code.
 # `-Wno-unused-parameter' quiets many warnings about LLVM headers.
+# `-Wno-missing-field-initializers' quiets many warnings about LLVM headers.
 #
 if test "$ac_test_CXXFLAGS" = set; then
   # The user specified `CXXFLAGS', so do nothing.
   CXXFLAGS="$CXXFLAGS"
-elif test "$GXX" = yes; then 
-  CXXFLAGS="-g -O3 -fno-strict-aliasing -Wall -Wextra -Wno-long-long -Wno-unused-parameter"
+elif test "$GXX" = yes; then
+  CXXFLAGS="-g -O3 -fno-strict-aliasing -Wall -Wextra -Wno-long-long -Wno-unused-parameter -Wno-missing-field-initializers"
 fi
 
 ###############################################################################
@@ -84,46 +86,42 @@ AX_PROG_PERL_VERSION([5.10.0],
 # these are not found at configure time.  Let the user install the dependencies
 # later.
 #
-missing_runtime_prereq=no
+missing_required_runtime_prereq=no
+missing_optional_runtime_prereq=no
 #
 # creduce/creduce.in
 #
 AX_PROG_PERL_MODULES(
   [
-    Benchmark::Timer
     Exporter::Lite
     File::Which
     Getopt::Tabular
     Regexp::Common
-    Sys::CPU
   ],
   [
-    PERL_MODULES=yes
+    REQUIRED_PERL_MODULES=yes
   ],
   [
-    PERL_MODULES=no
-    missing_runtime_prereq=yes
+    REQUIRED_PERL_MODULES=no
+    missing_required_runtime_prereq=yes
+  ])
+AX_PROG_PERL_MODULES(
+  [
+    Term::ReadKey
+  ],
+  [
+    OPTIONAL_PERL_MODULES=yes
+  ],
+  [
+    OPTIONAL_PERL_MODULES=no
+    missing_optional_runtime_prereq=yes
   ])
 #
 # creduce/pass_indent.pm
 #
-AC_ARG_VAR([ASTYLE], [`astyle' (Artistic Style) program])
-AC_PATH_PROG([ASTYLE], [astyle], [no])
-AS_IF([test "x$ASTYLE" = "xno"], [missing_runtime_prereq=yes])
-#
 AC_ARG_VAR([CLANG_FORMAT], [`clang-format' (LLVM/Clang) program])
 AC_PATH_PROG([CLANG_FORMAT], [clang-format], [no], [$LLVM_BINDIR:$PATH])
-AS_IF([test "x$CLANG_FORMAT" = "xno"], [missing_runtime_prereq=yes])
-#
-AC_ARG_VAR([INDENT], [`indent' program])
-AC_PATH_PROG([INDENT], [indent], [no])
-AS_IF([test "x$INDENT" = "xno"], [missing_runtime_prereq=yes])
-#
-# creduce/pass_lines.pm
-#
-AC_ARG_VAR([TOPFORMFLAT], [`topformflat' (Berkeley Delta) program])
-AC_PATH_PROG([TOPFORMFLAT], [topformflat], [no])
-AS_IF([test "x$TOPFORMFLAT" = "xno"], [missing_runtime_prereq=yes])
+AS_IF([test "x$CLANG_FORMAT" = "xno"], [missing_required_runtime_prereq=yes])
 
 ###############################################################################
 
@@ -132,8 +130,10 @@ AC_OUTPUT(
   clang_delta/Makefile
   clex/Makefile
   creduce/Makefile
+  delta/Makefile
   scripts/Makefile
   tests/Makefile
+  unifdef/Makefile
 )
 
 ###############################################################################
@@ -141,36 +141,38 @@ AC_OUTPUT(
 # Warn about things that will be needed at run time, but which we did not find
 # at configure time.
 #
-AS_IF([test "$missing_runtime_prereq" = "yes"],
+# First warn about required run-time dependencies...
+#
+AS_IF([test "$missing_required_runtime_prereq" = "yes"],
   AS_BOX([WARNING: You cannot run C-Reduce until you install missing dependencies!]))
 
-AS_IF([test "$PERL_MODULES" = "no"],
+AS_IF([test "$REQUIRED_PERL_MODULES" = "no"],
   [
-    AC_MSG_WARN([You must install Perl modules required by C-Reduce])
-  ])
-AS_IF([test "x$ASTYLE" = "xno"],
-  [
-    AC_MSG_WARN([You must install Artistic Style before running C-Reduce])
-    ASTYLE=astyle
+    AC_MSG_WARN([You must install Perl modules required by C-Reduce.])
   ])
 AS_IF([test "x$CLANG_FORMAT" = "xno"],
   [
-    AC_MSG_WARN([You must install clang-format before running C-Reduce])
+    AC_MSG_WARN([You must install `clang-format' before running C-Reduce.])
     CLANG_FORMAT=clang-format
   ])
-AS_IF([test "x$INDENT" = "xno"],
+
+AS_IF([test "$missing_required_runtime_prereq" = "yes"],
+  AC_MSG_WARN([Read the INSTALL file for info about C-Reduce dependencies.]))
+
+# ...and then warn about optional run-time dependencies.
+#
+AS_IF([test "$missing_optional_runtime_prereq" = "yes"],
+  AS_BOX([NOTE: The following optional C-Reduce dependencies were not found.      ]))
+
+AS_IF([test "$OPTIONAL_PERL_MODULES" = "no"],
   [
-    AC_MSG_WARN([You must install GNU Indent before running C-Reduce])
-    INDENT=indent
-  ])
-AS_IF([test "x$TOPFORMFLAT" = "xno"],
-  [
-    AC_MSG_WARN([You must install Berkeley Delta before running C-Reduce])
-    TOPFORMFLAT=topformflat
+    AC_MSG_NOTICE([One or more useful Perl modules were not found.])
   ])
 
-AS_IF([test "$missing_runtime_prereq" = "yes"],
-  AC_MSG_WARN([Read the INSTALL file for info about C-Reduce dependencies]))
+AS_IF([test "$missing_optional_runtime_prereq" = "yes"],
+  AC_MSG_NOTICE([C-Reduce will use these tools if you install them in the future.]))
+AS_IF([test "$missing_optional_runtime_prereq" = "yes"],
+  AC_MSG_NOTICE([Read the INSTALL file for info about C-Reduce dependencies.]))
 
 ###############################################################################
 

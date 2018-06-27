@@ -1,6 +1,6 @@
 ## -*- mode: Perl -*-
 ##
-## Copyright (c) 2012, 2013, 2015 The University of Utah
+## Copyright (c) 2012, 2013, 2015, 2016 The University of Utah
 ## All rights reserved.
 ##
 ## This file is distributed under the University of Illinois Open Source
@@ -15,6 +15,7 @@ use warnings;
 
 use POSIX;
 
+use Cwd 'abs_path';
 use File::Copy;
 use File::Spec;
 
@@ -42,7 +43,8 @@ sub count_instances ($$) {
 sub check_prereqs () {
     $ORIG_DIR = getcwd();
     my $path;
-    if ($FindBin::RealBin eq bindir) {
+    my $abs_bindir = abs_path(bindir);
+    if ((defined $abs_bindir) && ($FindBin::RealBin eq $abs_bindir)) {
 	# This script is in the installation directory.
 	# Use the installed `clang_delta'.
 	$path = libexecdir . "/clang_delta";
@@ -76,7 +78,7 @@ sub advance ($$$) {
     my %sh = %{$state};
     return \%sh if defined($sh{"start"});
     $sh{"index"} += $sh{"chunk"};
-    if ($VERBOSE) {
+    if ($DEBUG) {
 	my $index = $sh{"index"};
 	my $chunk = $sh{"chunk"};
 	print "ADVANCE: index = $index, chunk = $chunk\n";
@@ -98,7 +100,7 @@ sub transform ($$$) {
 	my $instances = count_instances($cfile,$which);
 	$sh{"chunk"} = $instances;
 	$sh{"instances"} = $instances;
-	print "initial granularity = $instances\n" if $VERBOSE;
+	print "initial granularity = $instances\n" if $DEBUG;
 	$sh{"index"} = 1;
     }
 
@@ -110,18 +112,18 @@ sub transform ($$$) {
     my $instances = $sh{"instances"};
     my $tmpfile = File::Temp::tmpnam();
 
-    print "TRANSFORM: index = $index, chunk = $chunk, instances = $instances\n" if $VERBOSE;
+    print "TRANSFORM: index = $index, chunk = $chunk, instances = $instances\n" if $DEBUG;
 
     if ($index <= $instances) {
 	my $end = $index + $chunk;
 	if ($end > $instances) {
 	    $end = $instances;
 	}
-	
+
 	my $dec = $end - $index + 1;
 
 	my $cmd = qq{"$clang_delta" --transformation=$which --counter=$index --to-counter=$end $cfile};
-	print "$cmd\n" if $VERBOSE;
+	print "$cmd\n" if $DEBUG;
 	my $res = run_clang_delta ("$cmd > $tmpfile");
 
 	if ($res==0) {
@@ -131,38 +133,21 @@ sub transform ($$$) {
 	    if ($res == -1) {
 		# nothing?
 	    } elsif ($res == -2) {
-        unlink $tmpfile;
-		print "out of instances!\n" if $VERBOSE;
+		unlink $tmpfile;
+		print "out of instances!\n" if $DEBUG;
 		goto rechunk;
 	    } else {
-		my $crashfile = $tmpfile;
-		$crashfile =~ s/\//_/g;
-		my ($suffix) = $cfile =~ /(\.[^.]+)$/;
-		$crashfile = "clang_delta_crash" . $crashfile . $suffix;
-		my $crashfile_path = File::Spec->join($ORIG_DIR, $crashfile);
-		File::Copy::copy($cfile, $crashfile_path);
-		open TMPF, ">>$crashfile_path";
-		print TMPF "\n\n";
-		print TMPF "\/\/ this should reproduce the crash:\n";
-		print TMPF "\/\/ $clang_delta --transformation=$which --counter=$index $crashfile_path\n";
-		close TMPF;
-		print "\n\n=======================================\n\n";
-		print "OOPS: clang_delta crashed; please consider mailing\n";
-		print "${crashfile}\n";
-		print "to creduce-bugs\@flux.utah.edu and we will try to fix the bug\n";
-		print "please also let us know what version of C-Reduce you are using\n";
-		print "\n=======================================\n\n";
+		unlink $tmpfile;
+		return ($ERROR, "crashed: $cmd");
 	    }
-	    unlink $tmpfile;
-	    return ($STOP, \%sh);
-	}    	
+	}
 	File::Copy::move($tmpfile, $cfile);
     } else {
       rechunk:
 	return ($STOP, \%sh) if ($sh{"chunk"} < 10);
 	my $newchunk = round ($sh{"chunk"} / 2.0);
 	$sh{"chunk"} = $newchunk;
-	print "granularity = $newchunk\n" if $VERBOSE;
+	print "granularity = $newchunk\n" if $DEBUG;
 	$sh{"index"} = 1;
 	goto AGAIN;
     }

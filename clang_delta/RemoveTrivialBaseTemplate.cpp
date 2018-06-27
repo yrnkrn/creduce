@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2013 The University of Utah
+// Copyright (c) 2012, 2013, 2015, 2016, 2017 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -21,7 +21,6 @@
 #include "TransformationManager.h"
 
 using namespace clang;
-using namespace llvm;
 
 static const char *DescriptionMsg = 
 "This pass removes a base class if it is an instantiation from a class \
@@ -60,7 +59,8 @@ void RemoveTrivialBaseTemplate::Initialize(ASTContext &context)
 
 void RemoveTrivialBaseTemplate::HandleTranslationUnit(ASTContext &Ctx)
 {
-  if (TransformationManager::isCLangOpt()) {
+  if (TransformationManager::isCLangOpt() ||
+      TransformationManager::isOpenCLLangOpt()) {
     ValidInstanceNum = 0;
   }
   else {
@@ -88,7 +88,8 @@ void RemoveTrivialBaseTemplate::HandleTranslationUnit(ASTContext &Ctx)
 void RemoveTrivialBaseTemplate::handleOneCXXRecordDecl(
        const CXXRecordDecl *CXXRD)
 {
-  if (isSpecialRecordDecl(CXXRD) || !CXXRD->hasDefinition())
+  if (isInIncludedFile(CXXRD) || isSpecialRecordDecl(CXXRD) ||
+      !CXXRD->hasDefinition())
     return;
 
   const CXXRecordDecl *CanonicalRD = CXXRD->getCanonicalDecl();
@@ -102,7 +103,7 @@ void RemoveTrivialBaseTemplate::handleOneCXXRecordDecl(
     const CXXBaseSpecifier *BS = I;
     const Type *Ty = BS->getType().getTypePtr();
     const CXXRecordDecl *Base = getBaseDeclFromType(Ty);
-    if (!Base || Base->hasDefinition()) {
+    if (!Base || getNumExplicitDecls(Base)) {
       continue;
     }
     const ClassTemplateDecl *TmplD = Base->getDescribedClassTemplate();

@@ -1,6 +1,6 @@
 ## -*- mode: Perl -*-
 ##
-## Copyright (c) 2012, 2013 The University of Utah
+## Copyright (c) 2012, 2013, 2015, 2016 The University of Utah
 ## All rights reserved.
 ##
 ## This file is distributed under the University of Illinois Open Source
@@ -15,6 +15,7 @@ use warnings;
 
 use POSIX;
 
+use Cwd 'abs_path';
 use File::Copy;
 use File::Spec;
 
@@ -30,7 +31,8 @@ my $ORIG_DIR;
 sub check_prereqs () {
     $ORIG_DIR = getcwd();
     my $path;
-    if ($FindBin::RealBin eq bindir) {
+    my $abs_bindir = abs_path(bindir);
+    if ((defined $abs_bindir) && ($FindBin::RealBin eq $abs_bindir)) {
 	# This script is in the installation directory.
 	# Use the installed `clex'.
 	$path = libexecdir . "/clex";
@@ -69,18 +71,17 @@ sub transform ($$$) {
     my $index = ${$state};
     my $tmpfile = File::Temp::tmpnam();
     my $cmd = qq{"$clex" $which $index $cfile};
-    print "$cmd\n" if $VERBOSE;
-    my $res = runit ("$cmd > $tmpfile");
-    if ($res==0) {
+    print "$cmd\n" if $DEBUG;
+    system ("$cmd > $tmpfile");
+    my $res = $? >> 8;
+    if ($res == 51) {
 	File::Copy::move($tmpfile, $cfile);
 	return ($OK, \$index);
-    } else {
-	if ($res == -1) {
-	} else {
-	    # TODO -- log a crash like we do for clang-delta
-	}
+    } elsif ($res == 71) {
 	unlink $tmpfile;
 	return ($STOP, \$index);
+    } else {
+	return ($ERROR, "crashed: $cmd");
     }    
 }
 

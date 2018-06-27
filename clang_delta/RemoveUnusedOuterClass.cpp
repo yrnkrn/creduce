@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2013 The University of Utah
+// Copyright (c) 2012, 2013, 2015, 2016, 2017 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -22,7 +22,6 @@
 #include "TransformationManager.h"
 
 using namespace clang;
-using namespace llvm;
 
 static const char *DescriptionMsg = 
 "This pass an unused outer class if \n\
@@ -61,7 +60,8 @@ bool RemoveUnusedOuterClassVisitor::VisitRecordTypeLoc(RecordTypeLoc TLoc)
 bool RemoveUnusedOuterClassVisitor::VisitCXXRecordDecl(
        CXXRecordDecl *CXXRD)
 {
-  if (ConsumerInstance->isSpecialRecordDecl(CXXRD) || 
+  if (ConsumerInstance->isInIncludedFile(CXXRD) ||
+      ConsumerInstance->isSpecialRecordDecl(CXXRD) ||
       !CXXRD->hasDefinition() ||
       dyn_cast<ClassTemplateSpecializationDecl>(CXXRD) ||
       CXXRD->hasUserDeclaredConstructor() ||
@@ -81,7 +81,8 @@ void RemoveUnusedOuterClass::Initialize(ASTContext &context)
 
 void RemoveUnusedOuterClass::HandleTranslationUnit(ASTContext &Ctx)
 {
-  if (TransformationManager::isCLangOpt()) {
+  if (TransformationManager::isCLangOpt() ||
+      TransformationManager::isOpenCLLangOpt()) {
     ValidInstanceNum = 0;
   }
   else {
@@ -107,7 +108,7 @@ void RemoveUnusedOuterClass::HandleTranslationUnit(ASTContext &Ctx)
 
 void RemoveUnusedOuterClass::analyzeCXXRDSet()
 {
-  for (CXXRecordDeclSet::iterator I = CXXRDDefSet.begin(), 
+  for (CXXRecordDeclSetVector::iterator I = CXXRDDefSet.begin(), 
        E = CXXRDDefSet.end(); I != E; ++I) {
     const CXXRecordDecl *Def = (*I);
     if (UsedCXXRDSet.count(Def->getCanonicalDecl()))
@@ -138,7 +139,7 @@ void RemoveUnusedOuterClass::removeOuterClass()
     TheRewriter.RemoveText(AS->getSourceRange());
   }
   
-  LocStart = TheCXXRDDef->getRBraceLoc();
+  LocStart = TheCXXRDDef->getBraceRange().getEnd();
   LocEnd = RewriteHelper->getLocationUntil(LocStart, ';');
   if (LocStart.isInvalid() || LocEnd.isInvalid())
     return;

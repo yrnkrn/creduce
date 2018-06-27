@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2013 The University of Utah
+// Copyright (c) 2012, 2013, 2015, 2017 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -23,7 +23,6 @@
 #include "TransformationManager.h"
 
 using namespace clang;
-using namespace llvm;
 
 static const char *DescriptionMsg =
 "Combine local variable declarations with the same type. \
@@ -86,6 +85,9 @@ const Type *CombLocalVarCollectionVisitor::getTypeFromDeclStmt(DeclStmt *DS)
 
 bool CombLocalVarCollectionVisitor::VisitCompoundStmt(CompoundStmt *CS)
 {
+  if (ConsumerInstance->isInIncludedFile(CS))
+    return true;
+
   ConsumerInstance->DeclStmts.clear();
 
   for (CompoundStmt::body_iterator I = CS->body_begin(), 
@@ -100,7 +102,7 @@ bool CombLocalVarCollectionVisitor::VisitCompoundStmt(CompoundStmt *CS)
 
     const Type *CanonicalT = 
       ConsumerInstance->Context->getCanonicalType(T);
-    DenseMap<const Type *, DeclStmt *>::iterator TI = 
+    llvm::DenseMap<const Type *, DeclStmt *>::iterator TI = 
       ConsumerInstance->DeclStmts.find(CanonicalT);
     if (TI == ConsumerInstance->DeclStmts.end()) {
       ConsumerInstance->DeclStmts[CanonicalT] = DS;

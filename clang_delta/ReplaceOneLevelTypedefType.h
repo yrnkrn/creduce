@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2013 The University of Utah
+// Copyright (c) 2012, 2013, 2016 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -12,7 +12,7 @@
 #define REPLACE_ONE_LEVEL_TYPEDEF_TYPE_H
 
 #include "Transformation.h"
-#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/SmallVector.h"
 #include "clang/AST/TypeLoc.h"
 
@@ -40,7 +40,7 @@ private:
   typedef llvm::SmallVector<clang::TypedefTypeLoc, 10>
     TypedefTypeLocVector;
 
-  typedef llvm::DenseMap<const clang::TypedefDecl *, 
+  typedef llvm::MapVector<const clang::TypedefDecl *, 
                          TypedefTypeLocVector *>
     TypedefDeclToRefMap;
 

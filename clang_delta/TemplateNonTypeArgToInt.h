@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2013 The University of Utah
+// Copyright (c) 2012, 2013, 2016 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -24,6 +24,7 @@ namespace clang {
   class TemplateArgument;
   class TemplateSpecializationTypeLoc;
   class NamedDecl;
+  class ValueDecl;
 }
 
 namespace clang_delta_common_visitor {
@@ -45,6 +46,7 @@ public:
       CollectionVisitor(NULL),
       ArgCollector(NULL),
       TheExpr(NULL),
+      TheValueDecl(NULL),
       IntString("1")
   {}
 
@@ -82,6 +84,8 @@ private:
   TemplateNonTypeArgToIntArgCollector *ArgCollector;
 
   clang::Expr *TheExpr;
+
+  const clang::ValueDecl *TheValueDecl;
 
   std::string IntString;
 

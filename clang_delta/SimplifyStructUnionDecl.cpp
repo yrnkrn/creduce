@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2013, 2014 The University of Utah
+// Copyright (c) 2012, 2013, 2014, 2015, 2017 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -21,7 +21,6 @@
 #include "TransformationManager.h"
 
 using namespace clang;
-using namespace llvm;
 
 static const char *DescriptionMsg =
 "This pass combines the declaration of global vars declared \
@@ -80,6 +79,9 @@ void SimplifyStructUnionDecl::Initialize(ASTContext &context)
 bool SimplifyStructUnionDecl::HandleTopLevelDecl(DeclGroupRef DGR) 
 {
   DeclGroupRef::iterator DI = DGR.begin();
+  if (isInIncludedFile(*DI))
+    return true;
+
   const RecordDecl *RD = dyn_cast<RecordDecl>(*DI);
   if (RD) {
     addOneRecordDecl(RD, DGR);

@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2013 The University of Utah
+// Copyright (c) 2012, 2013, 2015, 2017 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -21,7 +21,6 @@
 #include "TransformationManager.h"
 
 using namespace clang;
-using namespace llvm;
 
 static const char *DescriptionMsg =
 "This pass replaces a dependent name (referred by typename) with \n\
@@ -71,7 +70,8 @@ void ReplaceDependentName::Initialize(ASTContext &context)
 
 void ReplaceDependentName::HandleTranslationUnit(ASTContext &Ctx)
 {
-  if (TransformationManager::isCLangOpt()) {
+  if (TransformationManager::isCLangOpt() ||
+      TransformationManager::isOpenCLLangOpt()) {
     ValidInstanceNum = 0;
   }
   else {
@@ -115,8 +115,10 @@ SourceLocation ReplaceDependentName::getElaboratedTypeLocBegin(
 void ReplaceDependentName::handleOneElaboratedTypeLoc(
        const ElaboratedTypeLoc &TLoc)
 {
-  if (TLoc.getBeginLoc().isInvalid())
+  SourceLocation Loc = TLoc.getBeginLoc();
+  if (Loc.isInvalid() || isInIncludedFile(Loc))
     return;
+
   const ElaboratedType *ET = TLoc.getTypePtr();
   if ((ET->getKeyword() != ETK_Typename) && (ET->getKeyword() != ETK_None))
     return;
@@ -146,7 +148,8 @@ void ReplaceDependentName::handleOneElaboratedTypeLoc(
 void ReplaceDependentName::handleOneDependentNameTypeLoc(
        const DependentNameTypeLoc &TLoc)
 {
-  if (TLoc.getBeginLoc().isInvalid())
+  SourceLocation Loc = TLoc.getBeginLoc();
+  if (Loc.isInvalid() || isInIncludedFile(Loc))
     return;
 
   const DependentNameType *DNT = 

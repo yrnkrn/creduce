@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2013, 2014 The University of Utah
+// Copyright (c) 2012, 2013, 2014, 2015 2016 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -73,7 +73,9 @@ public:
       RewriteHelper(NULL),
       Rewritten(false),
       MultipleRewrites(false),
-      ToCounter(-1)
+      ToCounter(-1),
+      DoReplacement(false),
+      CheckReference(false)
   {
     // Nothing to do
   }
@@ -92,7 +94,9 @@ public:
       RewriteHelper(NULL),
       Rewritten(false),
       MultipleRewrites(MultipleRewritesFlag),
-      ToCounter(-1)
+      ToCounter(-1),
+      DoReplacement(false),
+      CheckReference(false)
   {
     // Nothing to do
   }
@@ -118,6 +122,16 @@ public:
 
   void setQueryInstanceFlag(bool Flag) {
     QueryInstanceOnly = Flag;
+  }
+
+  void setReplacement(const std::string &Str) {
+    Replacement = Str;
+    DoReplacement = true;
+  }
+
+  void setReferenceValue(const std::string &Str) {
+    ReferenceValue = Str;
+    CheckReference = true;
   }
 
   bool transSuccess() {
@@ -270,6 +284,12 @@ protected:
 
   unsigned getNumExplicitDecls(const clang::CXXRecordDecl *CXXRD);
 
+  bool isInIncludedFile(clang::SourceLocation Loc) const;
+
+  bool isInIncludedFile(const clang::Decl *D) const;
+
+  bool isInIncludedFile(const clang::Stmt *S) const;
+
   const std::string Name;
 
   int TransformationCounter;
@@ -295,6 +315,14 @@ protected:
   const bool MultipleRewrites;
 
   int ToCounter;
+
+  bool DoReplacement;
+
+  std::string Replacement;
+
+  bool CheckReference;
+
+  std::string ReferenceValue;
 };
 
 class TransNameQueryVisitor;

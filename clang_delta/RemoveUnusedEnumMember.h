@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012 The University of Utah
+// Copyright (c) 2012, 2015 The University of Utah
 // Copyright (c) 2012 Konstantin Tokarev <annulen@yandex.ru>
 // All rights reserved.
 //
@@ -44,7 +44,6 @@ private:
 
   clang::EnumDecl *TheEnumDecl;
   clang::EnumDecl::enumerator_iterator TheEnumIterator;
-  clang::EnumDecl::enumerator_iterator TheEnumIteratorPrevious;
 
   // Unimplemented
   RemoveUnusedEnumMember();

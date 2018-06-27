@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2013 The University of Utah
+// Copyright (c) 2012, 2013, 2015, 2016, 2017 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -23,7 +23,6 @@
 #include "TransformationManager.h"
 
 using namespace clang;
-using namespace llvm;
 
 static const char *DescriptionMsg =
 "This pass replaces a struct with its parent if it has only one \
@@ -79,6 +78,8 @@ private:
 
 bool SimplifyStructCollectionVisitor::VisitRecordDecl(RecordDecl *RD)
 {
+  if (ConsumerInstance->isInIncludedFile(RD))
+    return true;
   if (!RD->isThisDeclarationADefinition() || !RD->isStruct())
     return true;
   if (ConsumerInstance->isSpecialRecordDecl(RD))
@@ -169,9 +170,8 @@ bool SimplifyStructRewriteVisitor::VisitRecordDecl(RecordDecl *RD)
   if (!RD->isThisDeclarationADefinition())
     return true;
 
-  SourceLocation LBLoc =
-    ConsumerInstance->RewriteHelper->getLocationUntil(RD->getLocation(), '{');
-  SourceLocation RBLoc = RD->getRBraceLoc();
+  SourceLocation LBLoc = RD->getBraceRange().getBegin();
+  SourceLocation RBLoc = RD->getBraceRange().getEnd();
   ConsumerInstance->TheRewriter.RemoveText(SourceRange(LBLoc, RBLoc));
   return true;
 }
@@ -225,6 +225,9 @@ bool SimplifyStructRewriteVisitor::VisitMemberExpr(MemberExpr *ME)
     "Unmatched Replacing RD!");
 
   SourceLocation LocEnd = ME->getLocEnd();
+  if (LocEnd.isMacroID()) {
+    LocEnd = ConsumerInstance->SrcManager->getSpellingLoc(LocEnd);
+  }
   SourceLocation ArrowPos = 
       Lexer::findLocationAfterToken(LocEnd,
                                     tok::arrow,

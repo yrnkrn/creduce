@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2013 The University of Utah
+// Copyright (c) 2012, 2013, 2015, 2017 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -21,7 +21,6 @@
 #include "TransformationManager.h"
 
 using namespace clang;
-using namespace llvm;
 
 static const char *DescriptionMsg = 
 "This pass tries to instantiate a template parameter with  \
@@ -168,7 +167,8 @@ void InstantiateTemplateParam::Initialize(ASTContext &context)
 
 void InstantiateTemplateParam::HandleTranslationUnit(ASTContext &Ctx)
 {
-  if (TransformationManager::isCLangOpt()) {
+  if (TransformationManager::isCLangOpt() ||
+      TransformationManager::isOpenCLLangOpt()) {
     ValidInstanceNum = 0;
   }
   else {
@@ -348,6 +348,9 @@ InstantiateTemplateParam::getTemplateArgumentString(const TemplateArgument &Arg,
 void InstantiateTemplateParam::handleOneTemplateSpecialization(
        const TemplateDecl *D, const TemplateArgumentList & ArgList)
 {
+  if (isInIncludedFile(D))
+    return;
+
   NamedDecl *ND = D->getTemplatedDecl();
   TemplateParameterSet ParamsSet;
   TemplateParameterVisitor ParameterVisitor(ParamsSet);

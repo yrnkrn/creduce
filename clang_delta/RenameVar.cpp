@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2013 The University of Utah
+// Copyright (c) 2012, 2013, 2015, 2016, 2017 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -24,7 +24,6 @@
 #include "TransformationManager.h"
 
 using namespace clang;
-using namespace llvm;
 
 static const char *DescriptionMsg =
 "To increase readability, rename global and local variables \
@@ -68,6 +67,9 @@ private:
 
 bool RNVCollectionVisitor::VisitVarDecl(VarDecl *VD)
 {
+  if (ConsumerInstance->isInIncludedFile(VD))
+    return true;
+
   ParmVarDecl *PV = dyn_cast<ParmVarDecl>(VD);
   // Skip parameters
   if (PV)
@@ -103,6 +105,12 @@ bool RenameVarVisitor::VisitDeclRefExpr(DeclRefExpr *DRE)
 
   if (I == ConsumerInstance->VarToNameMap.end())
     return true;
+
+  // We can visit the same DRE twice from an InitListExpr, i.e.,
+  // through InitListExpr's semantic form and syntactic form.
+  if (ConsumerInstance->VisitedDREs.count(DRE))
+    return true;
+  ConsumerInstance->VisitedDREs.insert(DRE);
 
   return ConsumerInstance->RewriteHelper->replaceExpr(DRE, (*I).second);
 }

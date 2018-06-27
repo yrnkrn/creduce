@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2013 The University of Utah
+// Copyright (c) 2012, 2013, 2015 The University of Utah
 // Copyright (c) 2012 Konstantin Tokarev <annulen@yandex.ru>
 // All rights reserved.
 //
@@ -45,9 +45,10 @@ private:
   RemoveEnumMemberValue *ConsumerInstance;
 };
 
-bool RemoveEnumMemberValueAnalysisVisitor::VisitEnumConstantDecl(EnumConstantDecl *ECD)
+bool RemoveEnumMemberValueAnalysisVisitor::VisitEnumConstantDecl(
+       EnumConstantDecl *ECD)
 {
-  if (!ECD->getInitExpr())
+  if (ConsumerInstance->isInIncludedFile(ECD) || !ECD->getInitExpr())
     return true;
 
   ConsumerInstance->ValidInstanceNum++;

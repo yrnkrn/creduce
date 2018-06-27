@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2013, 2014 The University of Utah
+// Copyright (c) 2012, 2013, 2014, 2015, 2016, 2017 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -23,7 +23,6 @@
 #include "TransformationManager.h"
 
 using namespace clang;
-using namespace llvm;
 
 static const char *DescriptionMsg = 
 "This pass tries to remove one unused parameter from a class template \
@@ -53,7 +52,7 @@ private:
 
 namespace {
 
-typedef SmallPtrSet<const NamedDecl *, 8> TemplateParameterSet;
+typedef llvm::SmallPtrSet<const NamedDecl *, 8> TemplateParameterSet;
 
 class TemplateParameterVisitor : public 
   RecursiveASTVisitor<TemplateParameterVisitor> {
@@ -104,6 +103,44 @@ bool ArgumentDependencyVisitor::VisitTemplateTypeParmType(
   if (I != VisitsCountSet.end()) {
     unsigned Count = (*I).second + 1;
     VisitsCountSet[(*I).first] = Count;
+  }
+  return true;
+}
+
+class ClassTemplateMethodVisitor : public
+  RecursiveASTVisitor<ClassTemplateMethodVisitor> {
+
+public:
+  ClassTemplateMethodVisitor(ReduceClassTemplateParameter *Instance,
+                             unsigned Idx)
+    : ConsumerInstance(Instance), TheParameterIndex(Idx)
+  { }
+
+  bool VisitFunctionDecl(FunctionDecl *FD);
+
+private:
+  ReduceClassTemplateParameter *ConsumerInstance;
+
+  unsigned TheParameterIndex;
+};
+
+bool ClassTemplateMethodVisitor::VisitFunctionDecl(FunctionDecl *FD)
+{
+  FunctionTemplateDecl *TD = FD->getDescribedFunctionTemplate();
+  for (FunctionDecl::redecl_iterator I = FD->redecls_begin(),
+       E = FD->redecls_end(); I != E; ++I) {
+    unsigned Num = (*I)->getNumTemplateParameterLists();
+    for (unsigned Idx = 0; Idx < Num; ++Idx) {
+      const TemplateParameterList *TPList = (*I)->getTemplateParameterList(Idx);
+      // We don't want to mistakenly rewrite template parameters associated
+      // with the FD if FD is a function template.
+      if (TD && TPList == TD->getTemplateParameters())
+        continue;
+      const NamedDecl *Param = TPList->getParam(TheParameterIndex);
+      SourceRange Range = Param->getSourceRange();
+      ConsumerInstance->removeParameterByRange(Range, TPList,
+                                               TheParameterIndex);
+    }
   }
   return true;
 }
@@ -183,6 +220,9 @@ bool ReduceClassTemplateParameterRewriteVisitor::
 bool ReduceClassTemplateParameterASTVisitor::VisitClassTemplateDecl(
        ClassTemplateDecl *D)
 {
+  if (ConsumerInstance->isInIncludedFile(D))
+    return true;
+
   ClassTemplateDecl *CanonicalD = D->getCanonicalDecl();
   if (ConsumerInstance->VisitedDecls.count(CanonicalD))
     return true;
@@ -250,7 +290,8 @@ void ReduceClassTemplateParameter::Initialize(ASTContext &context)
 
 void ReduceClassTemplateParameter::HandleTranslationUnit(ASTContext &Ctx)
 {
-  if (TransformationManager::isCLangOpt()) {
+  if (TransformationManager::isCLangOpt() ||
+      TransformationManager::isOpenCLLangOpt()) {
     ValidInstanceNum = 0;
   }
   else {
@@ -270,6 +311,7 @@ void ReduceClassTemplateParameter::HandleTranslationUnit(ASTContext &Ctx)
   Ctx.getDiagnostics().setSuppressAllDiagnostics(false);
 
   removeParameterFromDecl();
+  removeParameterFromMethods();
   removeParameterFromPartialSpecs();
   ArgRewriteVisitor->TraverseDecl(Ctx.getTranslationUnitDecl());
 
@@ -318,6 +360,16 @@ void ReduceClassTemplateParameter::removeParameterFromDecl()
   }
 }
 
+void ReduceClassTemplateParameter::removeParameterFromMethods()
+{
+  CXXRecordDecl *CXXRD = TheClassTemplateDecl->getTemplatedDecl();
+  for (auto I = CXXRD->method_begin(), E = CXXRD->method_end();
+       I != E; ++I) {
+    ClassTemplateMethodVisitor V(this, TheParameterIndex);
+    V.TraverseDecl(*I);
+  }
+}
+
 void ReduceClassTemplateParameter::removeOneParameterByArgExpression(
        const ClassTemplatePartialSpecializationDecl *PartialD,
        const TemplateArgument &Arg)
@@ -327,7 +379,7 @@ void ReduceClassTemplateParameter::removeOneParameterByArgExpression(
 
   const Expr *E = Arg.getAsExpr();
   TransAssert(E && "Bad Expression!");
-  const DeclRefExpr *DRE = dyn_cast<DeclRefExpr>(E);
+  const DeclRefExpr *DRE = dyn_cast<DeclRefExpr>(E->IgnoreParenCasts());
   TransAssert(DRE && "Bad DeclRefExpr!");
   const NonTypeTemplateParmDecl *ParmD = 
     dyn_cast<NonTypeTemplateParmDecl>(DRE->getDecl());

@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2013 The University of Utah
+// Copyright (c) 2012, 2013, 2015, 2017 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -21,7 +21,6 @@
 #include "TransformationManager.h"
 
 using namespace clang;
-using namespace llvm;
 
 static const char *DescriptionMsg =
 "This pass replaces typedef names with the underlying type if the \
@@ -68,6 +67,8 @@ private:
 
 bool ReplaceSimpleTypedefCollectionVisitor::VisitTypedefDecl(TypedefDecl *TdefD)
 {
+  if (ConsumerInstance->isInIncludedFile(TdefD))
+    return true;
   TypedefDecl *CanonicalD = dyn_cast<TypedefDecl>(TdefD->getCanonicalDecl());
   if (!ConsumerInstance->VisitedTypedefDecls.count(CanonicalD)) {
     ConsumerInstance->handleOneTypedefDecl(CanonicalD);
@@ -79,6 +80,9 @@ bool ReplaceSimpleTypedefCollectionVisitor::VisitTypedefDecl(TypedefDecl *TdefD)
 
 bool ReplaceSimpleTypedefRewriteVisitor::VisitTypedefTypeLoc(TypedefTypeLoc Loc)
 {
+  if (ConsumerInstance->isInIncludedFile(Loc.getBeginLoc()))
+    return true;
+
   const TypedefType *TdefTy = Loc.getTypePtr();
   const TypedefDecl *TdefD = dyn_cast<TypedefDecl>(TdefTy->getDecl());
   if (!TdefD || TdefD->getLocStart().isInvalid())

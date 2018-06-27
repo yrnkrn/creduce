@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2013 The University of Utah
+// Copyright (c) 2012, 2013, 2015 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -48,7 +48,7 @@ private:
 
   SimplifyNestedClassVisitor *CollectionVisitor;
 
-  SimplifyNestedClassRewriteVisitor *RewriteVisitor;;
+  SimplifyNestedClassRewriteVisitor *RewriteVisitor;
 
   const clang::CXXRecordDecl *TheBaseCXXRD;
 

@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2013 The University of Utah
+// Copyright (c) 2012, 2013, 2015, 2016, 2017 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -22,7 +22,6 @@
 #include "TransformationManager.h"
 
 using namespace clang;
-using namespace llvm;
 
 static const char *DescriptionMsg = 
 "This pass tries to simplify nested classes by replacing the \
@@ -55,7 +54,8 @@ private:
 bool SimplifyNestedClassVisitor::VisitCXXRecordDecl(
        CXXRecordDecl *CXXRD)
 {
-  if (ConsumerInstance->isSpecialRecordDecl(CXXRD) || !CXXRD->hasDefinition())
+  if (ConsumerInstance->isInIncludedFile(CXXRD) ||
+      ConsumerInstance->isSpecialRecordDecl(CXXRD) || !CXXRD->hasDefinition())
     return true;
   ConsumerInstance->handleOneCXXRecordDecl(CXXRD->getDefinition());
   return true;
@@ -105,7 +105,8 @@ void SimplifyNestedClass::Initialize(ASTContext &context)
 
 void SimplifyNestedClass::HandleTranslationUnit(ASTContext &Ctx)
 {
-  if (TransformationManager::isCLangOpt()) {
+  if (TransformationManager::isCLangOpt() ||
+      TransformationManager::isOpenCLLangOpt()) {
     ValidInstanceNum = 0;
   }
   else {
@@ -138,7 +139,7 @@ void SimplifyNestedClass::removeOuterClass()
   LocEnd = LocEnd.getLocWithOffset(-1);
   TheRewriter.RemoveText(SourceRange(LocStart, LocEnd));
 
-  LocStart = TheBaseCXXRD->getRBraceLoc();
+  LocStart = TheBaseCXXRD->getBraceRange().getEnd();
   LocEnd = RewriteHelper->getLocationUntil(LocStart, ';');
   if (LocStart.isInvalid() || LocEnd.isInvalid())
     return;

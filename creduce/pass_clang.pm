@@ -1,6 +1,6 @@
 ## -*- mode: Perl -*-
 ##
-## Copyright (c) 2012, 2013, 2014 The University of Utah
+## Copyright (c) 2012, 2013, 2014, 2015, 2016 The University of Utah
 ## All rights reserved.
 ##
 ## This file is distributed under the University of Illinois Open Source
@@ -15,6 +15,7 @@ use warnings;
 
 use POSIX;
 
+use Cwd 'abs_path';
 use File::Copy;
 use File::Spec;
 
@@ -30,7 +31,8 @@ my $ORIG_DIR;
 sub check_prereqs () {
     $ORIG_DIR = getcwd();
     my $path;
-    if ($FindBin::RealBin eq bindir) {
+    my $abs_bindir = abs_path(bindir);
+    if ((defined $abs_bindir) && ($FindBin::RealBin eq $abs_bindir)) {
 	# This script is in the installation directory.
 	# Use the installed `clang_delta'.
 	$path = libexecdir . "/clang_delta";
@@ -69,41 +71,18 @@ sub transform ($$$) {
     my $index = ${$state};
     my $tmpfile = File::Temp::tmpnam();
     my $cmd = qq{"$clang_delta" --transformation=$which --counter=$index $cfile};
-    print "$cmd\n" if $VERBOSE;
+    print "$cmd\n" if $DEBUG;
     my $res = run_clang_delta ("$cmd > $tmpfile");
     if ($res==0) {
 	File::Copy::move($tmpfile, $cfile);
 	return ($OK, \$index);
     } else {
-	if (($res == -1) || ($res == -2)) {
-	} else {
-            my $n = int(rand(1000000));
-            my $crashfile = File::Spec->join($ORIG_DIR, "creduce_bug_$n");
-            File::Copy::copy($cfile, $crashfile) or die;
-            open  CRASH, ">>$crashfile";
-            print CRASH "\n\n";
-            print CRASH "\/\/ this should reproduce the crash:\n";
-            print CRASH "\/\/ $clang_delta --transformation=$which --counter=$index $crashfile\n";
-            close CRASH;
-            print <<"EOT";
-
-
-=======================================
-
-OOPS: clang_delta::$which has crashed, which means
-you have encountered a bug in C-Reduce. Please
-consider mailing ${crashfile} to
-creduce-bugs\@flux.utah.edu and we will try to fix
-the bug. Please also let us know what version of
-C-Reduce you are using and include any other
-details that may help us reproduce the problem.
-
-=======================================
-
-EOT
-        }
         unlink $tmpfile;
-        return ($STOP, \$index);
+	if (($res != -1) && ($res != -2)) {
+	    return ($ERROR, "crashed: $cmd");
+        } else {
+	    return ($STOP, \$index);
+	}
     }
 }
 

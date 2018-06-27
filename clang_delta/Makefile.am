@@ -1,6 +1,6 @@
 ## -*- mode: Makefile-Automake -*-
 ##
-## Copyright (c) 2012, 2013, 2014, 2015 The University of Utah
+## Copyright (c) 2012, 2013, 2014, 2015, 2016, 2017, 2018 The University of Utah
 ## All rights reserved.
 ##
 ## This file is distributed under the University of Illinois Open Source
@@ -11,15 +11,89 @@
 libexec_PROGRAMS = clang_delta
 
 GIT_HASH := $(shell "$(top_srcdir)/git-hash.sh" "$(top_srcdir)" || echo error)
-GIT_FLAG = -DGIT_VERSION=\"$(GIT_HASH)\"
 
+DUMMY1 := $(shell echo "$(GIT_HASH)" > git_version.txt.tmp)
+DUMMY2 := $(shell cmp -s git_version.txt.tmp git_version.txt || \
+		  cp git_version.txt.tmp git_version.txt)
+DUMMY3 := $(shell rm -f git_version.txt.tmp)
+
+git_version_edit = sed \
+	-e 's|@GIT_HASH[@]|$(GIT_HASH)|g'
+
+git_version.cpp: git_version.cpp.in git_version.txt
+	rm -f $@ $@.tmp
+	srcdir=''; \
+	  test -f ./$@.in || srcdir=$(srcdir)/; \
+	  $(git_version_edit) $${srcdir}$@.in > $@.tmp
+	mv $@.tmp $@
+
+# llvm-lit is not installed into LLVM_BINDIR. To run `make check-clang-delta',
+# we have to manually copy llvm-lit from LLVM's build dir. This is also the
+# reason that I didn't create a check-local rule for running clang_delta tests.
+# It would fail everywhere else llvm-lit does exist, e.g. travis?
+check-clang-delta: tests/lit.site.cfg remove_lit_checks clang_delta
+	@ echo "--- Running tests for clang_delta ---"
+	@ $(LLVM_BINDIR)/llvm-lit -sv tests
+
+tests/lit.site.cfg: tests/lit.site.cfg.in
+	@ echo s=@abs_builddir[@]=$(abs_builddir)=g > lit.site.cfg.tmp
+	@ echo s=@LLVM_BINDIR[@]=$(LLVM_BINDIR)=g >> lit.site.cfg.tmp
+	@ echo s=@clang_delta_srcdir@=$(abs_srcdir)=g >> lit.site.cfg.tmp
+	@ sed -f lit.site.cfg.tmp tests/lit.site.cfg.in > $@
+	@ rm -f lit.site.cfg.tmp
+
+remove_lit_checks: tests/remove_lit_checks.in
+	@ echo s=@PERL_EXECUTABLE[@]=$(PERL)=g > remove_lit_checks.tmp
+	@ sed -f remove_lit_checks.tmp tests/remove_lit_checks.in > tests/$@
+	@ chmod +x tests/$@
+	@ rm -f remove_lit_checks.tmp
+
+# When setting `LLVMCXXFLAGS', we weed out command-line options that might be
+# troublesome (e.g., -W/-f options that are not supported by `CXX', or -W
+# options that turn warnings into errors).  We also weed out options that might
+# override choices that *we* want to control (e.g., debug and optimization
+# options).
+#
+# The subparts of the `grep' invocation below remove compiler command-line
+# options of the following forms:
+#   -W...                --- warning options
+#   -w                   --- inhibits all warnings
+#   -pedantic...         --- pedantic warning options
+#   -f...diagnostics...  --- diagnostics reporting options (GCC, Clang)
+#   -f...show...         --- diagnostics reporting options (Clang)
+#   -g...                --- debugging options
+#   -O...                --- optimization options
+# [And for the llvm.org-provided binary of Clang 3.8.0 for OS X, weed out:]
+#   -isysroot
+#   /Applications/Xcode.app/...
+#
+# The `tr/sed | grep | xargs' pipeline is intended to be portable.  We use
+# `grep' for matching because writing fancy, portable `sed' expressions is
+# difficult.  For example, some implementations use "\b" to match word
+# boundaries while others use "[[:<:]]" and "[[:>:]]".  The Autoconf
+# documentation says that anchored matches in `sed' are not portable.  Give up;
+# use `grep' instead.  Bonus: better readability!
+#
 # The funny quoting in `LLVMLIBS' avoids a warning from Automake:
 #   ...: linker flags such as `--libs' belong in `clang_delta_LDFLAGS'
 # The warning comes about because Automake doesn't understand $(shell).
 # Avoid the warning by making `--ldflags' and `--libs' not look like
 # linker options.
 #
-LLVMCXXFLAGS	:= $(shell "$(LLVM_CONFIG)" --cxxflags | sed -e 's/-Werror[^ ]*//g' -e 's/-pedantic[^ ]*//g' -e 's/-Wpedantic[^ ]*//g') \
+LLVMCXXFLAGS	:= $(shell \
+		     "$(LLVM_CONFIG)" --cxxflags | \
+		     tr '\t' ' ' | sed -e 's/  */ /g' | tr ' ' '\n' | \
+		     grep -v -e '^-W' \
+			     -e '^-w$$' \
+			     -e '^-pedantic' \
+			     -e '^-f[a-z-]*diagnostics' \
+			     -e '^-f[a-z-]*show' \
+			     -e '^-g' \
+			     -e '^-O$$' \
+			     -e '^-O[0-9s]' \
+			     -e '^-isysroot$$' \
+			     -e '^/Applications/Xcode\.app/.*\.sdk$$' | \
+		     xargs) \
                    -fno-rtti -fno-exceptions
 LLVMLDFLAGS	:= $(shell "$(LLVM_CONFIG)" \--ldflags)
 LLVMINCLUDEDIR	:= $(shell "$(LLVM_CONFIG)" --includedir)
@@ -27,7 +101,7 @@ LLVMLIBS	:= $(shell "$(LLVM_CONFIG)" \--libs) \
 		   $(shell "$(LLVM_CONFIG)" \--system-libs)
 
 clang_delta_CPPFLAGS = \
-	$(GIT_FLAG) \
+	$(CLANG_CPPFLAGS) \
 	-I"$(LLVMINCLUDEDIR)/clang"
 
 clang_delta_CXXFLAGS = \
@@ -54,10 +128,14 @@ clang_delta_CXXFLAGS = \
 # libraries.  So probably, we could move `LLVMLDFLAGS' back to the definition
 # of `clang_delta_LDFLAGS'.  I'll do that later.
 clang_delta_LDADD = \
+	-lclangStaticAnalyzerFrontend -lclangStaticAnalyzerCheckers \
+	-lclangStaticAnalyzerCore \
 	-lclangFrontendTool -lclangFrontend -lclangDriver -lclangSerialization \
 	-lclangCodeGen -lclangParse -lclangSema -lclangAnalysis \
 	-lclangRewriteFrontend -lclangRewrite -lclangAST -lclangBasic -lclangEdit -lclangLex \
+	-lclangARCMigrate \
 	$(LLVMLIBS) \
+	$(CLANG_LDFLAGS) \
 	$(LLVMLDFLAGS)
 
 # Automake doesn't grok our use of $(shell) in `clang_delta_LDADD', so it puts
@@ -88,6 +166,8 @@ clang_delta_SOURCES = \
 	CopyPropagation.h \
 	EmptyStructToInt.cpp \
 	EmptyStructToInt.h \
+	ExpressionDetector.cpp \
+	ExpressionDetector.h \
 	InstantiateTemplateParam.cpp \
 	InstantiateTemplateParam.h \
 	InstantiateTemplateTypeParamToInt.cpp \
@@ -154,6 +234,8 @@ clang_delta_SOURCES = \
 	RenameParam.h \
 	RenameVar.cpp \
 	RenameVar.h \
+	ReplaceArrayAccessWithIndex.cpp \
+	ReplaceArrayAccessWithIndex.h \
 	ReplaceArrayIndexVar.cpp \
 	ReplaceArrayIndexVar.h \
 	ReplaceCallExpr.cpp \
@@ -207,11 +289,42 @@ clang_delta_SOURCES = \
 	UnifyFunctionDecl.cpp \
 	UnifyFunctionDecl.h \
 	UnionToStruct.cpp \
-	UnionToStruct.h
+	UnionToStruct.h \
+	VectorToArray.cpp \
+	VectorToArray.h \
+	git_version.h
+
+nodist_clang_delta_SOURCES = \
+	git_version.cpp
+
+CLEANFILES = \
+	git_version.txt \
+	git_version.txt.tmp \
+	git_version.cpp \
+	git_version.cpp.tmp \
+	tests/lit.site.cfg \
+	tests/remove_lit_checks
 
 EXTRA_DIST = \
+	CMakeLists.txt \
 	README.txt \
-	test_transformation
+	git_version.cpp.in \
+	test_transformation \
+	tests/lit.cfg \
+	tests/lit.site.cfg.in \
+	tests/remove-unused-var/unused_var.cpp \
+	tests/remove_lit_checks.in \
+	tests/rename-var/rename-var.c
+
+CLEAN_TESTDIRS = $(sort $(dir $(wildcard tests/*/Output/.)))
+
+clean-local:
+	list='$(CLEAN_TESTDIRS)'; \
+	for dir in $$list; do \
+	  if test -d "$$dir"; then \
+	    rm -rf $$dir; \
+	  fi; \
+	done
 
 ###############################################################################
 

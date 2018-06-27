@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2013 The University of Utah
+// Copyright (c) 2012, 2013, 2015, 2016, 2017 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -21,7 +21,6 @@
 #include "TransformationManager.h"
 
 using namespace clang;
-using namespace llvm;
 using namespace clang_delta_common_visitor;
 
 static const char *DescriptionMsg =
@@ -78,7 +77,8 @@ void RenameClass::Initialize(ASTContext &context)
 
 void RenameClass::HandleTranslationUnit(ASTContext &Ctx)
 {
-  if (TransformationManager::isCLangOpt()) {
+  if (TransformationManager::isCLangOpt() ||
+      TransformationManager::isOpenCLLangOpt()) {
     ValidInstanceNum = 0;
   }
   else {
@@ -145,6 +145,8 @@ void RenameClass::doAnalysis(void)
       const CXXRecordDecl *CXXRD = (*I);
       if (UsedNameDecls.count(CXXRD->getCanonicalDecl()))
         continue;
+      if (isInIncludedFile(CXXRD))
+        continue;
 
       incValidInstance(CXXRD);
     }
@@ -157,7 +159,7 @@ bool RenameClass::isValidName(const std::string &Name)
     return false;
 
   char C = Name[0];
-  return (((C >= 'A') || (C <= 'Z')) && !isReservedName(C));
+  return (((C >= 'A') && (C <= 'Z')) && !isReservedName(C));
 }
 
 void RenameClass::addOneRecordDecl(const CXXRecordDecl *CanonicalRD,

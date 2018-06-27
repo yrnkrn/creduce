@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2013 The University of Utah
+// Copyright (c) 2012, 2013, 2015, 2016, 2017, 2018 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -16,7 +16,7 @@
 #include "clang/AST/NestedNameSpecifier.h"
 
 #ifndef ENABLE_TRANS_ASSERT
-  #define TransAssert(x) {if (!(x)) exit(0);}
+  #define TransAssert(x) {if (!(x)) exit(-1);}
 #else
   #define TransAssert(x) assert(x)
 #endif
@@ -49,6 +49,7 @@ namespace clang {
   class ClassTemplateDecl;
   class CXXMethodDecl;
   class NestedNameSpecifierLoc;
+  class ValueDecl;
 }
 
 class RewriteUtils {
@@ -72,7 +73,8 @@ public:
   bool removeVarFromDeclStmt(clang::DeclStmt *DS,
                                     const clang::VarDecl *VD,
                                     clang::Decl *PrevDecl,
-                                    bool IsFirstDecl);
+                                    bool IsFirstDecl,
+                                    bool *StmtRemoved);
 
   bool getExprString(const clang::Expr *E, 
                             std::string &ES);
@@ -99,6 +101,12 @@ public:
 
   bool addStringBeforeStmt(clang::Stmt *BeforeStmt,
                                   const std::string &Str,
+                                  bool NeedParen);
+
+  bool addStringBeforeStmtAndReplaceExpr(clang::Stmt *BeforeStmt,
+                                  const std::string &StmtStr,
+                                  const clang::Expr *E,
+                                  const std::string &ExprStr,
                                   bool NeedParen);
 
   bool addStringAfterStmt(clang::Stmt *AfterStmt, 
@@ -203,6 +211,19 @@ public:
   bool replaceNamedDeclName(const clang::NamedDecl *ND,
                             const std::string &NameStr);
 
+  ///\brief Replaces a value decl with a given string.
+  ///
+  ///For example: \code
+  /// enum E {...};
+  /// template <E argName> struct S { } => template <int> struct S { }
+  ///\endcode
+  ///
+  ///\param[in] VD - The decl to be replaced.
+  ///\param[in] Str - The replacement
+  ///\returns true on success.
+  ///
+  bool replaceValueDecl(const clang::ValueDecl *ValD, const std::string &Str);
+
   bool replaceCXXDtorCallExpr(const clang::CXXMemberCallExpr *CE,
                               std::string &Name);
 
@@ -289,6 +310,12 @@ private:
                                  std::string &NewStr,
                                  const std::string &IndentStr);
 
+  void addOpenParenBeforeStmt(clang::Stmt *S, const std::string &IndentStr);
+
+  bool addStringBeforeStmtInternal(clang::Stmt *S, const std::string &Str,
+                                   const std::string &IndentStr,
+                                   bool NeedParen);
+
   unsigned getOffsetBetweenLocations(clang::SourceLocation StartLoc,
                                             clang::SourceLocation EndLoc,
                                             clang::SourceManager *SrcManager);
@@ -309,6 +336,8 @@ private:
   clang::SourceLocation getExpansionEndLoc(clang::SourceLocation EndLoc);
 
   clang::SourceLocation getMacroExpansionLoc(clang::SourceLocation Loc);
+
+  clang::SourceRange getFileLocSourceRange(clang::SourceRange LocRange);
 
   // Unimplemented
   RewriteUtils(const RewriteUtils &);

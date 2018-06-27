@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2013, 2014, 2015 The University of Utah
+// Copyright (c) 2012, 2013, 2014, 2015, 2016 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -50,7 +50,7 @@ public:
 
 private:
   RemoveNestedFunction *ConsumerInstance;
-  
+
 };
 
 class RNFStatementVisitor : public CommonStatementVisitor<RNFStatementVisitor> {
@@ -71,7 +71,8 @@ private:
 
 bool RNFCollectionVisitor::VisitFunctionDecl(FunctionDecl *FD)
 {
-  if (!FD->isThisDeclarationADefinition())
+  if (ConsumerInstance->isInIncludedFile(FD) ||
+      !FD->isThisDeclarationADefinition())
     return true;
 
   ConsumerInstance->StmtVisitor->setCurrentFunctionDecl(FD);
@@ -90,7 +91,7 @@ bool RNFStatementVisitor::VisitStmtExpr(StmtExpr *SE)
 
   CallExpr *CallE = ConsumerInstance->CallExprQueue.back();
   CurrentStmt = CallE;
-  
+
   for (clang::CompoundStmt::body_iterator I = CS->body_begin(),
        E = CS->body_end(); I != E; ++I) {
     TraverseStmt(*I);
@@ -98,22 +99,22 @@ bool RNFStatementVisitor::VisitStmtExpr(StmtExpr *SE)
   return false;
 }
 
-bool RNFStatementVisitor::VisitCallExpr(CallExpr *CallE) 
+bool RNFStatementVisitor::VisitCallExpr(CallExpr *CallE)
 {
   if (const CXXOperatorCallExpr *OpE = dyn_cast<CXXOperatorCallExpr>(CallE)) {
     if (ConsumerInstance->isInvalidOperator(OpE))
       return true;
   }
 
-  if ((std::find(ConsumerInstance->ValidCallExprs.begin(), 
-                 ConsumerInstance->ValidCallExprs.end(), CallE) 
-          == ConsumerInstance->ValidCallExprs.end()) && 
+  if ((std::find(ConsumerInstance->ValidCallExprs.begin(),
+                 ConsumerInstance->ValidCallExprs.end(), CallE)
+          == ConsumerInstance->ValidCallExprs.end()) &&
       !ConsumerInstance->CallExprQueue.empty()) {
 
     ConsumerInstance->ValidInstanceNum++;
     ConsumerInstance->ValidCallExprs.push_back(CallE);
 
-    if (ConsumerInstance->ValidInstanceNum == 
+    if (ConsumerInstance->ValidInstanceNum ==
         ConsumerInstance->TransformationCounter) {
       ConsumerInstance->TheFuncDecl = CurrentFuncDecl;
       ConsumerInstance->TheStmt = CurrentStmt;
@@ -126,7 +127,8 @@ bool RNFStatementVisitor::VisitCallExpr(CallExpr *CallE)
 
   for (CallExpr::arg_iterator I = CallE->arg_begin(),
        E = CallE->arg_end(); I != E; ++I) {
-    TraverseStmt(*I);
+    Expr *Exp = *I;
+    TraverseStmt(Exp);
   }
 
   ConsumerInstance->CallExprQueue.pop_back();
@@ -134,23 +136,23 @@ bool RNFStatementVisitor::VisitCallExpr(CallExpr *CallE)
   return true;
 }
 
-void RemoveNestedFunction::Initialize(ASTContext &context) 
+void RemoveNestedFunction::Initialize(ASTContext &context)
 {
   Transformation::Initialize(context);
   NestedInvocationVisitor = new RNFCollectionVisitor(this);
   StmtVisitor = new RNFStatementVisitor(this);
-  NameQueryWrap = 
+  NameQueryWrap =
     new TransNameQueryWrap(RewriteHelper->getTmpVarNamePrefix());
 }
 
-bool RemoveNestedFunction::HandleTopLevelDecl(DeclGroupRef D) 
+bool RemoveNestedFunction::HandleTopLevelDecl(DeclGroupRef D)
 {
   for (DeclGroupRef::iterator I = D.begin(), E = D.end(); I != E; ++I) {
     NestedInvocationVisitor->TraverseDecl(*I);
   }
   return true;
 }
- 
+
 void RemoveNestedFunction::HandleTranslationUnit(ASTContext &Ctx)
 {
   if (QueryInstanceOnly)
@@ -170,8 +172,6 @@ void RemoveNestedFunction::HandleTranslationUnit(ASTContext &Ctx)
   NameQueryWrap->TraverseDecl(Ctx.getTranslationUnitDecl());
 
   addNewTmpVariable(Ctx);
-  addNewAssignStmt();
-  replaceCallExpr();
 
   if (Ctx.getDiagnostics().hasErrorOccurred() ||
       Ctx.getDiagnostics().hasFatalErrorOccurred())
@@ -184,7 +184,6 @@ void RemoveNestedFunction::getVarStrForTemplateSpecialization(
 {
   unsigned NumArgs = TST->getNumArgs();
   if (NumArgs == 0) {
-    VarStr += ";";
     return;
   }
 
@@ -203,27 +202,52 @@ void RemoveNestedFunction::getVarStrForTemplateSpecialization(
   TransAssert((EndPos != std::string::npos) && "Cannot find > !");
   TransAssert((EndPos > BeginPos) && "Invalid <> pair!");
   VarStr.replace(BeginPos + 1, (EndPos - BeginPos - 1), Stream.str());
-  VarStr += ";";
 }
 
-bool RemoveNestedFunction::writeNewTmpVariable(const QualType &QT,
-                                               std::string &VarStr)
+void RemoveNestedFunction::getNewTmpVariable(const QualType &QT,
+                                             std::string &VarStr)
 {
-  QT.getAsStringInternal(VarStr,
-                         Context->getPrintingPolicy());
-
-  VarStr += ";";
-  return RewriteHelper->addLocalVarToFunc(VarStr, TheFuncDecl);
+  QT.getAsStringInternal(VarStr, Context->getPrintingPolicy());
 }
 
-bool RemoveNestedFunction::writeNewIntTmpVariable(std::string &VarStr)
+void RemoveNestedFunction::getNewIntTmpVariable(std::string &VarStr)
 {
-  return RewriteHelper->addLocalVarToFunc("int " + VarStr + ";", TheFuncDecl);
+  VarStr = "int " + VarStr;
 }
 
-bool RemoveNestedFunction::addNewTmpVariable(ASTContext &ASTCtx)
+void RemoveNestedFunction::addNewTmpVariable(ASTContext &ASTCtx)
 {
   std::string VarStr;
+
+  getNewTmpVariableStr(ASTCtx, VarStr);
+  if (TransformationManager::isCXXLangOpt()) {
+    // TheStmt and TheCallExpr may share the same start location, e.g..
+    // TheCallExpr is a CXXOperatorCallExpr. In this case, we just replace
+    // TheCallExpr with tmp variable's definition and the tmp variable.
+    // Otherwise, we would end up with assertion failure, because we
+    // modify the same location twice (through addnewAssignStmtBefore
+    // and replaceExpr.
+    if (TheStmt->getLocStart() == TheCallExpr->getLocStart()) {
+      std::string ExprStr;
+      RewriteHelper->getExprString(TheCallExpr, ExprStr);
+      VarStr += " = " + ExprStr + ";\n" + TmpVarName;
+      RewriteHelper->replaceExpr(TheCallExpr, VarStr);
+      return;
+    }
+    RewriteHelper->addNewAssignStmtBefore(TheStmt, VarStr,
+                                          TheCallExpr, NeedParen);
+  }
+  else {
+    RewriteHelper->addLocalVarToFunc(VarStr + ";", TheFuncDecl);
+    RewriteHelper->addNewAssignStmtBefore(TheStmt, getTmpVarName(),
+                                          TheCallExpr, NeedParen);
+  }
+  RewriteHelper->replaceExpr(TheCallExpr, TmpVarName);
+}
+
+void RemoveNestedFunction::getNewTmpVariableStr(ASTContext &ASTCtx,
+                                                std::string &VarStr)
+{
   std::stringstream SS;
   unsigned int NamePostfix = NameQueryWrap->getMaxNamePostfix();
 
@@ -240,7 +264,7 @@ bool RemoveNestedFunction::addNewTmpVariable(ASTContext &ASTCtx)
     //   template<typename T> int foo2(int p) {return p;}
     //   template<typename T>
     //   void bar(void) { foo1<T>(foo2<T>(1)); }
-    // foo2<T>(1) has BuiltinType and hence 
+    // foo2<T>(1) has BuiltinType and hence
     // TheCallExpr->getCallReturnType() will segfault.
     // In this case, we have to lookup a corresponding function decl
 
@@ -257,21 +281,21 @@ bool RemoveNestedFunction::addNewTmpVariable(ASTContext &ASTCtx)
     }
     if (!FD) {
       DeclContextSet VisitedCtxs;
-      FD = 
+      FD =
         lookupFunctionDecl(DName, TheFuncDecl->getLookupParent(), VisitedCtxs);
     }
     // give up and generate a tmp var of int type, e.g.:
     // template <class T> struct S {
     //   T x;
-    //   template <class A> void foo(A &a0) { x(y(a0)); } 
+    //   template <class A> void foo(A &a0) { x(y(a0)); }
     // };
     if (!FD)
-      return writeNewIntTmpVariable(VarStr);
+      return getNewIntTmpVariable(VarStr);
 
     QT = FD->getReturnType();
     //FIXME: This is actually not quite correct, we should get the instantiated
     // type here.
-    return writeNewTmpVariable(QT, VarStr);
+    return getNewTmpVariable(QT, VarStr);
   }
 
   if (const UnresolvedMemberExpr *UM = dyn_cast<UnresolvedMemberExpr>(E)) {
@@ -282,28 +306,28 @@ bool RemoveNestedFunction::addNewTmpVariable(ASTContext &ASTCtx)
     // FIXME: try to resolve FD here
     if (FD)
       QT = FD->getReturnType();
-    return writeNewTmpVariable(QT, VarStr);
+    return getNewTmpVariable(QT, VarStr);
   }
 
-  if (const CXXTemporaryObjectExpr *CXXTE = 
+  if (const CXXTemporaryObjectExpr *CXXTE =
       dyn_cast<CXXTemporaryObjectExpr>(E)) {
     const CXXConstructorDecl *CXXCtor = CXXTE->getConstructor();
     QT = CXXCtor->getThisType(ASTCtx);
-    return writeNewTmpVariable(QT, VarStr);
+    return getNewTmpVariable(QT, VarStr);
   }
 
-  if (const CXXTemporaryObjectExpr *CXXTE = 
+  if (const CXXTemporaryObjectExpr *CXXTE =
       dyn_cast<CXXTemporaryObjectExpr>(E)) {
     const CXXConstructorDecl *CXXCtor = CXXTE->getConstructor();
     QT = CXXCtor->getThisType(ASTCtx);
-    return writeNewTmpVariable(QT, VarStr);
+    return getNewTmpVariable(QT, VarStr);
   }
 
-  if (const CXXDependentScopeMemberExpr *ME = 
+  if (const CXXDependentScopeMemberExpr *ME =
       dyn_cast<CXXDependentScopeMemberExpr>(E)) {
 
     if (ME->isImplicitAccess())
-      return false;
+      return;
     DeclarationName DName = ME->getMember();
     TransAssert((DName.getNameKind() == DeclarationName::Identifier) &&
                 "Not an indentifier!");
@@ -331,17 +355,17 @@ bool RemoveNestedFunction::addNewTmpVariable(ASTContext &ASTCtx)
       const FunctionDecl *FD = lookupFunctionDecl(DName, Ctx, VisitedCtxs);
       TransAssert(FD && "Cannot resolve DName!");
       QT = FD->getReturnType();
-      return writeNewTmpVariable(QT, VarStr);
+      return getNewTmpVariable(QT, VarStr);
     }
-    
-    // handle other cases where lookupDeclContext is different from 
+
+    // handle other cases where lookupDeclContext is different from
     // the current CXXRecord, e.g.,
     const Type *Ty = ME->getBaseType().getTypePtr();
     if (const DeclContext *Ctx = getBaseDeclFromType(Ty)) {
       DeclContextSet VisitedCtxs;
       const FunctionDecl *FD = lookupFunctionDecl(DName, Ctx, VisitedCtxs);
       if (!FD) {
-        return writeNewTmpVariable(QT, VarStr);
+        return getNewTmpVariable(QT, VarStr);
       }
       QT = FD->getReturnType();
       const Type *RVTy = QT.getTypePtr();
@@ -357,16 +381,15 @@ bool RemoveNestedFunction::addNewTmpVariable(ASTContext &ASTCtx)
         // }
         // in this case, seems it's hard to retrieve the instantiated type
         // of f's return type, because `D<T> G' is dependent. I tried
-        // findSpecialization from ClassTemplateDecl, but it didn't work. 
+        // findSpecialization from ClassTemplateDecl, but it didn't work.
         // So use a really ugly way, i.e., manipulating strings...
-        const TemplateSpecializationType *TST = 
+        const TemplateSpecializationType *TST =
           Ty->getAs<TemplateSpecializationType>();
         TransAssert(TST && "Invalid TemplateSpecialization Type!");
 
         QT.getAsStringInternal(VarStr,
                                Context->getPrintingPolicy());
-        getVarStrForTemplateSpecialization(VarStr, TST);
-        return RewriteHelper->addLocalVarToFunc(VarStr, TheFuncDecl);
+        return getVarStrForTemplateSpecialization(VarStr, TST);
       }
       else {
         // other cases:
@@ -378,11 +401,11 @@ bool RemoveNestedFunction::addNewTmpVariable(ASTContext &ASTCtx)
         //   D<T> G;
         //   foo(G.f());
         // }
-        return writeNewTmpVariable(QT, VarStr);
+        return getNewTmpVariable(QT, VarStr);
       }
     }
     else {
-      // template <typename> struct D { 
+      // template <typename> struct D {
       // D f();
       // D operator[] (int);
       // };
@@ -394,7 +417,7 @@ bool RemoveNestedFunction::addNewTmpVariable(ASTContext &ASTCtx)
       // In this case, G[0] is of BuiltinType.
       // But why does clang represent a dependent type as BuiltinType here?
 
-      TransAssert((Ty->getAs<BuiltinType>() || 
+      TransAssert((Ty->getAs<BuiltinType>() ||
                    Ty->getAs<TemplateTypeParmType>() ||
                    Ty->getAs<TypedefType>() ||
                    Ty->getAs<DependentNameType>())
@@ -404,13 +427,13 @@ bool RemoveNestedFunction::addNewTmpVariable(ASTContext &ASTCtx)
       //  - how can we find a correct DeclContext where we could lookup f?
       //  - can we obtain the dependent template argument from BuiltinType?
       // Probably we cannot do these? Comments from lib/AST/ASTContext.cpp:
-      // 
+      //
       // Placeholder type for type-dependent expressions whose type is
       // completely unknown. No code should ever check a type against
       // DependentTy and users should never see it; however, it is here to
       // help diagnose failures to properly check for type-dependent
       // expressions.
-      return writeNewIntTmpVariable(VarStr);
+      return getNewIntTmpVariable(VarStr);
     }
   }
 
@@ -419,36 +442,23 @@ bool RemoveNestedFunction::addNewTmpVariable(ASTContext &ASTCtx)
   //   T1 x; T2 y;
   //   template <class A> void foo(A &a0) { x(y(a0)); }
   // };
-  if (const TemplateTypeParmType *PT = 
+  if (const TemplateTypeParmType *PT =
       dyn_cast<TemplateTypeParmType>(CalleeType)) {
     const TemplateTypeParmDecl *PD = PT->getDecl();
     std::string DStr = PD->getNameAsString();
-    VarStr = DStr + " " + VarStr + ";";
-    return RewriteHelper->addLocalVarToFunc(VarStr, TheFuncDecl);
+    VarStr = DStr + " " + VarStr;
+    return;
   }
-  //  return writeNewIntTmpVariable(VarStr);
   QT = TheCallExpr->getCallReturnType(ASTCtx);
-  return writeNewTmpVariable(QT, VarStr);
-}
-
-bool RemoveNestedFunction::addNewAssignStmt(void)
-{
-  return RewriteHelper->addNewAssignStmtBefore(TheStmt,
-                                              getTmpVarName(),
-                                              TheCallExpr, 
-                                              NeedParen);
-
-}
-
-bool RemoveNestedFunction::replaceCallExpr(void)
-{
-  return RewriteHelper->replaceExpr(TheCallExpr, TmpVarName);
+  getNewTmpVariable(
+    QT.getTypePtr()->getUnqualifiedDesugaredType()->getCanonicalTypeInternal(),
+    VarStr);
 }
 
 bool RemoveNestedFunction::isInvalidOperator(const CXXOperatorCallExpr *OpE)
 {
   OverloadedOperatorKind K = OpE->getOperator();
-  // ISSUE: overloaded Equal-family operators cause bad recursion, 
+  // ISSUE: overloaded Equal-family operators cause bad recursion,
   //        omit it for now.
   switch (K) {
   case OO_Equal:
@@ -465,6 +475,7 @@ bool RemoveNestedFunction::isInvalidOperator(const CXXOperatorCallExpr *OpE)
   case OO_GreaterGreaterEqual:
   case OO_ExclaimEqual:
   case OO_LessEqual:
+  case OO_LessLess:
   case OO_GreaterEqual: // Fall-through
     return true;
   default:

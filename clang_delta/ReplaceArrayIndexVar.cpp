@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2013 The University of Utah
+// Copyright (c) 2012, 2013, 2015, 2017 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -22,7 +22,6 @@
 #include "TransformationManager.h"
 
 using namespace clang;
-using namespace llvm;
 
 static const char *DescriptionMsg =
 "Looking for the pattern like below: \n\
@@ -34,10 +33,10 @@ if  is less than 15, then replace a[i] with  a[0] ... a[num-1]";
 static RegisterTransformation<ReplaceArrayIndexVar>
          Trans("replace-array-index-var", DescriptionMsg);
 
-typedef SmallPtrSet<const clang::ArraySubscriptExpr *, 10>
+typedef llvm::SmallPtrSet<const clang::ArraySubscriptExpr *, 10>
   ArraySubscriptExprSet;
 
-typedef DenseMap<const clang::VarDecl *, ArraySubscriptExprSet *>
+typedef llvm::DenseMap<const clang::VarDecl *, ArraySubscriptExprSet *>
   VarDeclToASESetMap;
 
 typedef llvm::DenseMap<const clang::VarDecl *, unsigned>
@@ -105,7 +104,7 @@ bool ReplaceArrayIndexVarCollectionVisitor::VisitVarDecl(VarDecl *VD)
   if (dyn_cast<ArrayType>(ElemTy))
     return true;
 
-  APInt APSz = CstArrayTy->getSize();
+  llvm::APInt APSz = CstArrayTy->getSize();
   unsigned Sz = (unsigned int)(*APSz.getRawData());
   if (Sz <= ConsumerInstance->MaxSize)
     ConsumerInstance->CstArrayVars[CanonicalVD] = Sz;
@@ -115,6 +114,9 @@ bool ReplaceArrayIndexVarCollectionVisitor::VisitVarDecl(VarDecl *VD)
 
 bool ReplaceArrayIndexVarCollectionVisitor::VisitForStmt(ForStmt *FS)
 {
+  if (ConsumerInstance->isInIncludedFile(FS))
+    return true;
+
   const Expr *Inc = FS->getInc();
   if (!Inc)
     return true;

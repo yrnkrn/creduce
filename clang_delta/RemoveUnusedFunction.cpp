@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2013, 2014, 2015 The University of Utah
+// Copyright (c) 2012, 2013, 2014, 2015, 2016, 2017 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -49,7 +49,7 @@ typedef llvm::DenseMap<const clang::UsingDecl *,
                        const clang::FunctionDecl *>
           UsingFunctionDeclsMap;
 
-typedef llvm::SmallPtrSet<const clang::FunctionDecl *, 50>
+typedef llvm::SmallPtrSet<const clang::FunctionDecl *, 32>
           FunctionDeclsSet;
 
 typedef llvm::SmallPtrSet<const clang::FunctionDecl *, 5>
@@ -57,7 +57,7 @@ typedef llvm::SmallPtrSet<const clang::FunctionDecl *, 5>
 
 namespace {
 
-class UsingDeclVisitor : public 
+class UsingDeclVisitor : public
         RecursiveASTVisitor<UsingDeclVisitor> {
 public:
   UsingDeclVisitor(const FunctionDecl *FD,
@@ -81,7 +81,7 @@ bool UsingDeclVisitor::VisitUsingDecl(UsingDecl *D)
 }
 // end of UsingDeclVisitor
 
-class SpecializationVisitor : public 
+class SpecializationVisitor : public
         RecursiveASTVisitor<SpecializationVisitor> {
 public:
   explicit SpecializationVisitor(RemoveUnusedFunction *Instance)
@@ -134,7 +134,7 @@ bool SpecializationVisitor::VisitCallExpr(
 
 // end of SpecializationVisitor
 
-class ReferencedFunctionDeclVisitor : public 
+class ReferencedFunctionDeclVisitor : public
         RecursiveASTVisitor<ReferencedFunctionDeclVisitor> {
 public:
   ReferencedFunctionDeclVisitor(const FunctionDecl *FD,
@@ -169,7 +169,7 @@ bool ReferencedFunctionDeclVisitor::VisitCXXDependentScopeMemberExpr(
 
 } // end of anon namespace
 
-class ExtraReferenceVisitorWrapper : public 
+class ExtraReferenceVisitorWrapper : public
         RecursiveASTVisitor<ExtraReferenceVisitorWrapper> {
 public:
   explicit ExtraReferenceVisitorWrapper(RemoveUnusedFunction *Instance)
@@ -197,6 +197,8 @@ bool ExtraReferenceVisitorWrapper::VisitFunctionDecl(FunctionDecl *FD)
 
 bool RUFAnalysisVisitor::VisitFunctionDecl(FunctionDecl *FD)
 {
+  if (ConsumerInstance->isInIncludedFile(FD))
+    return true;
   const FunctionDecl *CanonicalFD = FD->getCanonicalDecl();
   if (ConsumerInstance->VisitedFDs.count(CanonicalFD))
     return true;
@@ -214,7 +216,7 @@ bool RUFAnalysisVisitor::VisitFunctionDecl(FunctionDecl *FD)
     // don't need to track all specs, just associate FD with one
     // of those
     if (Info->getNumTemplates() > 0) {
-      const FunctionDecl *Member = 
+      const FunctionDecl *Member =
         Info->getTemplate(0)->getTemplatedDecl();
       ConsumerInstance->addOneMemberSpecialization(FD, Member);
     }
@@ -238,8 +240,9 @@ bool RUFAnalysisVisitor::VisitFunctionDecl(FunctionDecl *FD)
     return true;
   }
 
-  if (FD->isReferenced() || 
-      FD->isMain() || 
+  if (FD->isReferenced() ||
+      FD->isMain() ||
+      FD->hasAttr<OpenCLKernelAttr>() ||
       ConsumerInstance->hasReferencedSpecialization(CanonicalFD) ||
       ConsumerInstance->isInlinedSystemFunction(CanonicalFD) ||
       ConsumerInstance->isInReferencedSet(CanonicalFD) ||
@@ -250,7 +253,7 @@ bool RUFAnalysisVisitor::VisitFunctionDecl(FunctionDecl *FD)
   return true;
 }
 
-void RemoveUnusedFunction::Initialize(ASTContext &context) 
+void RemoveUnusedFunction::Initialize(ASTContext &context)
 {
   Transformation::Initialize(context);
   AnalysisVisitor = new RUFAnalysisVisitor(this);
@@ -315,7 +318,7 @@ void RemoveUnusedFunction::doRewriting()
     return;
   }
 
-  TransAssert((TransformationCounter <= 
+  TransAssert((TransformationCounter <=
                  static_cast<int>(AllValidFunctionDecls.size())) &&
               "TransformationCounter is larger than the number of defs!");
   TransAssert((ToCounter <= static_cast<int>(AllValidFunctionDecls.size())) &&
@@ -385,21 +388,39 @@ SourceLocation RemoveUnusedFunction::getFunctionOuterLocStart(
                  const FunctionDecl *FD)
 {
   SourceLocation LocStart = FD->getLocStart();
+  bool RecordLoc = false;
+
   // check if FD is from a function template
   if (FunctionTemplateDecl *FTD = FD->getDescribedFunctionTemplate()) {
-    // get FTD->getLocStart() only if it is less than FD->getLocStart, 
+    // get FTD->getLocStart() only if it is less than FD->getLocStart,
     // for example, in the code below:
     //   template <typename T> struct S {template <typename T1> void foo();};
     //   template<typename T> template<typename T1> void S<T>::foo() { }
     // where
     //   FTD->getLocStart() points to the begining of "template<typename T1>"
-    if (hasValidOuterLocStart(FTD, FD))
+    if (hasValidOuterLocStart(FTD, FD)) {
       LocStart = FTD->getLocStart();
+      RecordLoc = true;
+    }
   }
+
+  if (LocStart.isMacroID())
+    LocStart = SrcManager->getExpansionLoc(LocStart);
 
   // this is ugly, but how do we get the location of __extension__? e.g.:
   // __extension__ void foo();
   LocStart = getExtensionLocStart(LocStart);
+
+  // In some cases where the given input is not well-formed, we may
+  // end up with duplicate locations for the FunctionTemplateDecl
+  // case. In such cases, we simply return an invalid SourceLocation,
+  // which will ben skipped by the caller of getFunctionOuterLocStart.
+  if (RecordLoc) {
+    if (VisitedLocations.count(LocStart))
+      return SourceLocation();
+    VisitedLocations.insert(LocStart);
+  }
+
   return LocStart;
 }
 
@@ -419,7 +440,7 @@ bool RemoveUnusedFunction::isTokenOperator(SourceLocation Loc)
 // };
 // template struct S<char>;
 SourceLocation RemoveUnusedFunction::getFunctionLocEnd(
-                 SourceLocation LocStart, 
+                 SourceLocation LocStart,
                  SourceLocation LocEnd,
                  const FunctionDecl *FD)
 {
@@ -434,6 +455,8 @@ SourceLocation RemoveUnusedFunction::getFunctionLocEnd(
   }
 
   SourceLocation FDLoc = FD->getLocation();
+  if (FDLoc.isMacroID())
+    FDLoc = SrcManager->getExpansionLoc(FDLoc);
   const char * const FDBuf = SrcManager->getCharacterData(FDLoc);
   const char * LocEndBuf = SrcManager->getCharacterData(LocEnd);
   if ((FDBuf < LocEndBuf) && !isTokenOperator(FDLoc))
@@ -456,19 +479,25 @@ void RemoveUnusedFunction::removeOneFunctionDecl(const FunctionDecl *FD)
 {
   SourceRange FuncRange = FD->getSourceRange();
   SourceLocation LocEnd = FuncRange.getEnd();
+  if (LocEnd.isMacroID())
+    LocEnd = SrcManager->getExpansionLoc(LocEnd);
   if (!FD->isInExternCContext() && !FD->isInExternCXXContext()) {
     SourceLocation FuncLocStart = getFunctionOuterLocStart(FD);
+    if (FuncLocStart.isInvalid())
+      return;
     LocEnd = getFunctionLocEnd(FuncLocStart, LocEnd, FD);
-    if (SrcManager->isWrittenInMainFile(FuncLocStart) && 
+    if (SrcManager->isWrittenInMainFile(FuncLocStart) &&
         SrcManager->isWrittenInMainFile(LocEnd))
       TheRewriter.RemoveText(SourceRange(FuncLocStart, LocEnd));
     return;
   }
-  
+
   const DeclContext *Ctx = FD->getLookupParent();
   const LinkageSpecDecl *Linkage = dyn_cast<LinkageSpecDecl>(Ctx);
   if (!Linkage) {
     SourceLocation FuncLocStart = getFunctionOuterLocStart(FD);
+    if (FuncLocStart.isInvalid())
+      return;
     LocEnd = getFunctionLocEnd(FuncLocStart, LocEnd, FD);
     TheRewriter.RemoveText(SourceRange(FuncLocStart, LocEnd));
     return;
@@ -478,6 +507,8 @@ void RemoveUnusedFunction::removeOneFunctionDecl(const FunctionDecl *FD)
   // namespace { using ::foo; }
   if (Linkage->hasBraces()) {
     SourceLocation FuncLocStart = getFunctionOuterLocStart(FD);
+    if (FuncLocStart.isInvalid())
+      return;
     TheRewriter.RemoveText(SourceRange(FuncLocStart, LocEnd));
     return;
   }
@@ -485,6 +516,8 @@ void RemoveUnusedFunction::removeOneFunctionDecl(const FunctionDecl *FD)
   // extern "C++" void foo();
   // it also handles cases such as extern "C++" template<typename T> ...
   SourceLocation LocStart = Linkage->getExternLoc();
+  if (LocStart.isMacroID())
+    LocStart = SrcManager->getExpansionLoc(LocStart);
   LocStart = getExtensionLocStart(LocStart);
   TheRewriter.RemoveText(SourceRange(LocStart, LocEnd));
 }
@@ -544,7 +577,7 @@ void RemoveUnusedFunction::removeFunctionExplicitInstantiations(
 
   const FunctionDecl *CanonicalFD = FD->getCanonicalDecl();
   MemberSpecializationSet *S = MemberToInstantiations[CanonicalFD];
-  MemberSpecializationSet *ExplicitSpecs = 
+  MemberSpecializationSet *ExplicitSpecs =
           FuncToExplicitSpecs[CanonicalFD];
 
   for (FunctionTemplateDecl::spec_iterator I = FTD->spec_begin(),
@@ -613,7 +646,7 @@ void RemoveUnusedFunction::removeOneFunctionDeclGroup(const FunctionDecl *FD)
   for (UsingFunctionDeclsMap::const_iterator I = UsingFDs.begin(),
        E = UsingFDs.end(); I != E; ++I) {
     if ((*I).second != FD)
-      continue; 
+      continue;
     const FunctionDecl *ParentFD = UsingParentFDs[(*I).first];
     if (ParentFD && RemovedFDs.count(ParentFD->getCanonicalDecl()))
       continue;
@@ -627,8 +660,12 @@ bool RemoveUnusedFunction::hasAtLeastOneValidLocation(const FunctionDecl *FD)
        RE = FD->redecls_end(); RI != RE; ++RI) {
     SourceRange FuncRange = FD->getSourceRange();
     SourceLocation StartLoc = FuncRange.getBegin();
+    if (StartLoc.isMacroID())
+      StartLoc = SrcManager->getExpansionLoc(StartLoc);
     SourceLocation EndLoc = FuncRange.getEnd();
-    if (SrcManager->isWrittenInMainFile(StartLoc) && 
+    if (EndLoc.isMacroID())
+      EndLoc = SrcManager->getExpansionLoc(EndLoc);
+    if (SrcManager->isWrittenInMainFile(StartLoc) &&
         SrcManager->isWrittenInMainFile(EndLoc))
       return true;
   }
@@ -696,7 +733,7 @@ const FunctionDecl *RemoveUnusedFunction::getFunctionDeclFromSpecifier(
   return FD;
 }
 
-void RemoveUnusedFunction::handleOneUsingDecl(const FunctionDecl *CurrentFD, 
+void RemoveUnusedFunction::handleOneUsingDecl(const FunctionDecl *CurrentFD,
                                               const UsingDecl *UD)
 {
   if (VisitedUsingDecls.count(UD))
@@ -719,7 +756,7 @@ void RemoveUnusedFunction::handleOneUsingDecl(const FunctionDecl *CurrentFD,
               "Duplicate UsingDecl to FD map!");
   UsingFDs[UD] = CanonicalFD;
   if (CurrentFD) {
-    TransAssert(CurrentFD->isThisDeclarationADefinition() && 
+    TransAssert(CurrentFD->isThisDeclarationADefinition() &&
                 "CurrentFD is not a definition!");
     TransAssert((UsingParentFDs.find(UD) == UsingParentFDs.end()) &&
                 "Duplicate UsingDecl to ParentFD map!");
@@ -763,19 +800,19 @@ void RemoveUnusedFunction::handleOneUnresolvedLookupExpr(
       (K != DeclarationName::Identifier))
     return;
   const NestedNameSpecifier *NNS = E->getQualifier();
-  // we fail only if UE is invoked with some qualifier or 
+  // we fail only if UE is invoked with some qualifier or
   // instantiation, e.g.:
   // namespace NS { template<typename T> void foo(T&) { } }
-  // template<typename T> void bar(T p) { NS::foo(p); } 
-  // removing foo would fail. 
-  // 
+  // template<typename T> void bar(T p) { NS::foo(p); }
+  // removing foo would fail.
+  //
   // template <typename T> void foo() { }
   // template <typename T> void bar() { foo<T>(); }
   // removing foo would faill, too
-  // 
+  //
   // On the other handle, the following code is ok:
   // template<typename T> void foo(T&) { }
-  // template<typename T> void bar(T p) { foo(p); } 
+  // template<typename T> void bar(T p) { foo(p); }
   const FunctionDecl *FD = NULL;
   if (NNS) {
     FD = getFunctionDeclFromSpecifier(DName, NNS);
@@ -784,7 +821,7 @@ void RemoveUnusedFunction::handleOneUnresolvedLookupExpr(
     const DeclContext *Ctx = CurrentFD->getLookupParent();
     FD = lookupFunctionDeclShallow(DName, Ctx);
   }
-  
+
   if (!FD || FD->isReferenced())
     return;
   addOneReferencedFunction(FD);
@@ -805,7 +842,7 @@ const FunctionDecl *RemoveUnusedFunction::getSourceFunctionDecl(
         const FunctionDecl *TheFD)
 {
   if (FunctionTemplateDecl *FTD = TheFD->getPrimaryTemplate()) {
-    if (const FunctionTemplateDecl *D = 
+    if (const FunctionTemplateDecl *D =
         FTD->getInstantiatedFromMemberTemplate())
       return D->getTemplatedDecl();
     else
@@ -841,7 +878,7 @@ void RemoveUnusedFunction::handleOneFunctionDecl(const FunctionDecl *TheFD)
   // };                                        // line 4
   // template <> void foo(char);               // line 5
   // template class A<char, bool>;             // line 6
-  // In the code above, foo's spec_iterator has an explicit spec, 
+  // In the code above, foo's spec_iterator has an explicit spec,
   // but this spec's source range points to the dependent_spec at line 3,
   // and then we will be in trouble...
   if (TK == FunctionDecl::TK_DependentFunctionTemplateSpecialization) {
@@ -850,7 +887,7 @@ void RemoveUnusedFunction::handleOneFunctionDecl(const FunctionDecl *TheFD)
     // don't need to track all specs, just associate FD with one
     // of those
     if (Info->getNumTemplates() > 0) {
-      const FunctionDecl *Member = 
+      const FunctionDecl *Member =
         Info->getTemplate(0)->getTemplatedDecl();
       createFuncToExplicitSpecs(Member);
     }
@@ -877,8 +914,8 @@ void RemoveUnusedFunction::handleOneFunctionDecl(const FunctionDecl *TheFD)
   if (K != TSK_ExplicitInstantiationDeclaration &&
       K != TSK_ExplicitInstantiationDefinition)
     return;
-  
-  MemberSpecializationSet *S = 
+
+  MemberSpecializationSet *S =
     MemberToInstantiations[OrigFD->getCanonicalDecl()];
   if (S == NULL) {
     S = new MemberSpecializationSet();
@@ -969,7 +1006,7 @@ void RemoveUnusedFunction::setInlinedSystemFunctions(const FunctionDecl *FD)
 bool RemoveUnusedFunction::isInlinedSystemFunction(const FunctionDecl *FD)
 {
   std::string FDNameStr = FD->getNameAsString();
-  InlinedSystemFunctionsMap::iterator I = 
+  InlinedSystemFunctionsMap::iterator I =
     InlinedSystemFunctions.find(FDNameStr);
   if (I == InlinedSystemFunctions.end())
     return false;
@@ -979,7 +1016,7 @@ bool RemoveUnusedFunction::isInlinedSystemFunction(const FunctionDecl *FD)
 void RemoveUnusedFunction::addOneMemberSpecialization(
        const FunctionDecl *FD, const FunctionDecl *Member)
 {
-  MemberSpecializationSet *S = 
+  MemberSpecializationSet *S =
     MemberToSpecs[Member->getCanonicalDecl()];
   if (S == NULL) {
     S = new MemberSpecializationSet();
@@ -990,7 +1027,7 @@ void RemoveUnusedFunction::addOneMemberSpecialization(
 
 void RemoveUnusedFunction::createFuncToExplicitSpecs(const FunctionDecl *FD)
 {
-  MemberSpecializationSet *S = 
+  MemberSpecializationSet *S =
     FuncToExplicitSpecs[FD->getCanonicalDecl()];
   if (S == NULL) {
     S = new MemberSpecializationSet();
@@ -1000,13 +1037,13 @@ void RemoveUnusedFunction::createFuncToExplicitSpecs(const FunctionDecl *FD)
 
 void RemoveUnusedFunction::addFuncToExplicitSpecs(const FunctionDecl *FD)
 {
-  TransAssert((FD->getTemplateSpecializationKind() 
+  TransAssert((FD->getTemplateSpecializationKind()
                == TSK_ExplicitSpecialization) &&
               "Invalid template specialization kind!");
   const FunctionTemplateDecl *FTD = FD->getPrimaryTemplate();
   TransAssert(FTD && "NULL FunctionTemplateDecl!");
   const FunctionDecl *TemplatedFD = FTD->getTemplatedDecl();
-  MemberSpecializationSet *S = 
+  MemberSpecializationSet *S =
     FuncToExplicitSpecs[TemplatedFD->getCanonicalDecl()];
   if (S != NULL) {
     S->insert(FD);

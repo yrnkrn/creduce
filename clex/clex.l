@@ -1,6 +1,6 @@
 %{
 /*
- * Copyright (c) 2013, 2014 The University of Utah
+ * Copyright (c) 2013, 2014, 2015, 2016 The University of Utah
  * All rights reserved.
  *
  * This file is distributed under the University of Illinois Open Source
@@ -122,6 +122,7 @@ L?\"(\\.|[^\\"])*\"	{ process_token(TOK_STRING); }
 "|"			{ process_token(TOK_OP); }
 "?"			{ process_token(TOK_OP); }
 "#"                     { process_token(TOK_OTHER); }
+"\\"[ \t]*"\n"          { }
 "\\"                    { process_token(TOK_OTHER); }
 
 "/*"        {
@@ -130,7 +131,7 @@ L?\"(\\.|[^\\"])*\"	{ process_token(TOK_STRING); }
                          while ( (c = input()) != '*' &&
                                   c != EOF )
                              ;    /* eat up text of comment */
-     
+
                          if ( c == '*' )
                              {
                              while ( (c = input()) == '*' )
@@ -138,16 +139,17 @@ L?\"(\\.|[^\\"])*\"	{ process_token(TOK_STRING); }
                              if ( c == '/' )
                                  break;    /* found the end */
                              }
-     
+
                          if ( c == EOF )
                              {
-                             fprintf(stderr, "EOF in comment" );
-			     assert (0);
+                                 exit(STOP);
                              }
                     }
            }
 
-[ \t\v\n\f]		{ process_token(TOK_WS); }
+[ \t\v\f]		{ process_token(TOK_WS); }
+
+[\n]		        { process_token(TOK_NEWLINE); }
 
 .			{ process_token(TOK_UNKNOWN); }
 

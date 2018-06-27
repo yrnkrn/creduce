@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2013 The University of Utah
+// Copyright (c) 2012, 2013, 2015, 2017 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -21,7 +21,6 @@
 #include "TransformationManager.h"
 
 using namespace clang;
-using namespace llvm;
 
 static const char *DescriptionMsg =
 "This pass replaces typedef names with the underlying type if the \
@@ -77,7 +76,8 @@ void ReplaceDependentTypedef::Initialize(ASTContext &context)
 
 void ReplaceDependentTypedef::HandleTranslationUnit(ASTContext &Ctx)
 {
-  if (TransformationManager::isCLangOpt()) {
+  if (TransformationManager::isCLangOpt() ||
+      TransformationManager::isOpenCLLangOpt()) {
     ValidInstanceNum = 0;
   }
   else {
@@ -127,7 +127,7 @@ bool ReplaceDependentTypedef::isValidType(const QualType &QT)
 
 void ReplaceDependentTypedef::handleOneTypedefDecl(const TypedefDecl *D)
 {
-  if (D->getLocStart().isInvalid())
+  if (isInIncludedFile(D) || D->getLocStart().isInvalid())
     return;
 
   if (!isValidType(D->getUnderlyingType()))

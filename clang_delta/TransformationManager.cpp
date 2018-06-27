@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2013, 2014 The University of Utah
+// Copyright (c) 2012, 2013, 2014, 2015, 2016, 2017 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -46,6 +46,11 @@ TransformationManager *TransformationManager::GetInstance()
   return TransformationManager::Instance;
 }
 
+Preprocessor &TransformationManager::getPreprocessor()
+{
+  return GetInstance()->ClangInstance->getPreprocessor();
+}
+
 bool TransformationManager::isCXXLangOpt()
 {
   TransAssert(TransformationManager::Instance && "Invalid Instance!");
@@ -64,6 +69,15 @@ bool TransformationManager::isCLangOpt()
           .C99);
 }
 
+bool TransformationManager::isOpenCLLangOpt()
+{
+  TransAssert(TransformationManager::Instance && "Invalid Instance!");
+  TransAssert(TransformationManager::Instance->ClangInstance &&
+              "Invalid ClangInstance!");
+  return (TransformationManager::Instance->ClangInstance->getLangOpts()
+          .OpenCL);
+}
+
 bool TransformationManager::initializeCompilerInstance(std::string &ErrorMsg)
 {
   if (ClangInstance) {
@@ -76,29 +90,78 @@ bool TransformationManager::initializeCompilerInstance(std::string &ErrorMsg)
   
   ClangInstance->createDiagnostics();
 
+  TargetOptions &TargetOpts = ClangInstance->getTargetOpts();
+  PreprocessorOptions &PPOpts = ClangInstance->getPreprocessorOpts();
+  if (const char *env = getenv("CREDUCE_TARGET_TRIPLE")) {
+    TargetOpts.Triple = std::string(env);
+  } else {
+    TargetOpts.Triple = LLVM_DEFAULT_TARGET_TRIPLE;
+  }
+  llvm::Triple T(TargetOpts.Triple);
   CompilerInvocation &Invocation = ClangInstance->getInvocation();
   InputKind IK = FrontendOptions::getInputKindForExtension(
         StringRef(SrcFileName).rsplit('.').second);
-  if ((IK == IK_C) || (IK == IK_PreprocessedC)) {
-    Invocation.setLangDefaults(ClangInstance->getLangOpts(), IK_C);
+  if (IK.getLanguage() == InputKind::C) {
+    Invocation.setLangDefaults(ClangInstance->getLangOpts(), InputKind::C, T, PPOpts);
   }
-  else if ((IK == IK_CXX) || (IK == IK_PreprocessedCXX)) {
+  else if (IK.getLanguage() == InputKind::CXX) {
     // ISSUE: it might cause some problems when building AST
-    // for a function which has a non-declared callee, e.g., 
-    // It results an empty AST for the caller. 
-    Invocation.setLangDefaults(ClangInstance->getLangOpts(), IK_CXX);
+    // for a function which has a non-declared callee, e.g.,
+    // It results an empty AST for the caller.
+    Invocation.setLangDefaults(ClangInstance->getLangOpts(), InputKind::CXX, T, PPOpts);
+  }
+  else if(IK.getLanguage() == InputKind::OpenCL) {
+    //Commandline parameters
+    std::vector<const char*> Args;
+    Args.push_back("-x");
+    Args.push_back("cl");
+    Args.push_back("-Dcl_clang_storage_class_specifiers");
+
+    const char *CLCPath = getenv("CREDUCE_LIBCLC_INCLUDE_PATH");
+
+    ClangInstance->createFileManager();
+
+    if(CLCPath != NULL && ClangInstance->hasFileManager() &&
+       ClangInstance->getFileManager().getDirectory(CLCPath, false) != NULL) {
+        Args.push_back("-I");
+        Args.push_back(CLCPath);
+    }
+
+    Args.push_back("-include");
+    Args.push_back("clc/clc.h");
+    Args.push_back("-fno-builtin");
+
+    CompilerInvocation::CreateFromArgs(Invocation,
+                                       &Args[0], &Args[0] + Args.size(),
+                                       ClangInstance->getDiagnostics());
+    Invocation.setLangDefaults(ClangInstance->getLangOpts(),
+                               InputKind::OpenCL, T, PPOpts);
   }
   else {
     ErrorMsg = "Unsupported file type!";
     return false;
   }
 
-  TargetOptions &TargetOpts = ClangInstance->getTargetOpts();
-  TargetOpts.Triple = LLVM_DEFAULT_TARGET_TRIPLE;
   TargetInfo *Target = 
     TargetInfo::CreateTargetInfo(ClangInstance->getDiagnostics(),
                                  ClangInstance->getInvocation().TargetOpts);
   ClangInstance->setTarget(Target);
+
+  if (const char *env = getenv("CREDUCE_INCLUDE_PATH")) {
+    HeaderSearchOptions &HeaderSearchOpts = ClangInstance->getHeaderSearchOpts();
+
+    const std::size_t npos = std::string::npos;
+    std::string text = env;
+
+    std::size_t now = 0, next = 0;
+    do {
+      next = text.find(':', now);
+      std::size_t len = (next == npos) ? npos : (next - now);
+      HeaderSearchOpts.AddPath(text.substr(now, len), clang::frontend::Angled, false, false);
+      now = next + 1;
+    } while(next != npos);
+  }
+
   ClangInstance->createFileManager();
   ClangInstance->createSourceManager(ClangInstance->getFileManager());
   ClangInstance->createPreprocessor(TU_Complete);
@@ -108,11 +171,20 @@ bool TransformationManager::initializeCompilerInstance(std::string &ErrorMsg)
                            &ClangInstance->getPreprocessor());
   ClangInstance->createASTContext();
 
+  // It's not elegant to initialize these two here... Ideally, we 
+  // would put them in doTransformation, but we need these two
+  // flags being set before Transformation::Initialize, which
+  // is invoked through ClangInstance->setASTConsumer.
+  if (DoReplacement)
+    CurrentTransformationImpl->setReplacement(Replacement);
+  if (CheckReference)
+    CurrentTransformationImpl->setReferenceValue(ReferenceValue);
+
   assert(CurrentTransformationImpl && "Bad transformation instance!");
   ClangInstance->setASTConsumer(
     std::unique_ptr<ASTConsumer>(CurrentTransformationImpl));
   Preprocessor &PP = ClangInstance->getPreprocessor();
-  PP.getBuiltinInfo().InitializeBuiltins(PP.getIdentifierTable(),
+  PP.getBuiltinInfo().initializeBuiltins(PP.getIdentifierTable(),
                                          PP.getLangOpts());
 
   if (!ClangInstance->InitializeSourceManager(FrontendInputFile(SrcFileName, IK))) {
@@ -293,7 +365,11 @@ TransformationManager::TransformationManager()
     OutputFileName(""),
     CurrentTransName(""),
     ClangInstance(NULL),
-    QueryInstanceOnly(false)
+    QueryInstanceOnly(false),
+    DoReplacement(false),
+    Replacement(""),
+    CheckReference(false),
+    ReferenceValue("")
 {
   // Nothing to do
 }

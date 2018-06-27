@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2013, 2014 The University of Utah
+// Copyright (c) 2012, 2013, 2014, 2015, 2016, 2017 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -23,7 +23,6 @@
 #include "TransformationManager.h"
 
 using namespace clang;
-using namespace llvm;
 
 static const char *DescriptionMsg =
 "Another pass to increase readability of reduced code. \
@@ -104,7 +103,7 @@ private:
 
 bool RenameCXXMethodCollectionVisitor::VisitCXXRecordDecl(CXXRecordDecl *RD)
 {
-  if (!RD->hasDefinition())
+  if (ConsumerInstance->isInIncludedFile(RD) || !RD->hasDefinition())
     return true;
   const CXXRecordDecl *RDDef = RD->getDefinition();
   ConsumerInstance->handleOneCXXRecordDecl(RDDef);
@@ -113,6 +112,8 @@ bool RenameCXXMethodCollectionVisitor::VisitCXXRecordDecl(CXXRecordDecl *RD)
 
 bool RenameCXXMethodCollectionVisitor::VisitCXXMethodDecl(CXXMethodDecl *MD)
 {
+  if (ConsumerInstance->isInIncludedFile(MD))
+    return true;
   const CXXMethodDecl *CanonicalMD = MD->getCanonicalDecl();
   if(ConsumerInstance->NewMethodNames.find(CanonicalMD) != 
        ConsumerInstance->NewMethodNames.end())
@@ -188,7 +189,8 @@ bool RenameCXXMethodVisitor::TraverseClassTemplateDecl(ClassTemplateDecl *D)
 
 bool RenameCXXMethodVisitor::VisitCXXMethodDecl(CXXMethodDecl *MD)
 {
-  if (ConsumerInstance->isSpecialCXXMethod(MD))
+  if (ConsumerInstance->isSpecialCXXMethod(MD) ||
+      ConsumerInstance->isInIncludedFile(MD))
     return true;
 
   const CXXMethodDecl *CanonicalMD = MD->getCanonicalDecl();
@@ -426,9 +428,8 @@ bool RenameCXXMethod::isValidName(const StringRef &Name)
   StringRef NamePrefix = Name.substr(0, PrefixLen);
   if (!NamePrefix.equals(MethodNamePrefix))
     return false;
-  Name.drop_front(PrefixLen);
   llvm::APInt Num;
-  return Name.getAsInteger(10, Num);
+  return !Name.drop_front(PrefixLen).getAsInteger(10, Num);
 }
 
 void RenameCXXMethod::addOneMethodName(const CXXMethodDecl *MD,

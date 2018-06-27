@@ -1,6 +1,6 @@
-#!/usr/bin/perl -w
+## -*- mode: Makefile-Automake -*-
 ##
-## Copyright (c) 2015 The University of Utah
+## Copyright (c) 2015, 2016 The University of Utah
 ## All rights reserved.
 ##
 ## This file is distributed under the University of Illinois Open Source
@@ -8,12 +8,17 @@
 
 ###############################################################################
 
-use strict;
+libexec_PROGRAMS = unifdef
 
-my @deps = ("diff", "indent", "astyle", "topformflat", "clang_format");
-my @progs = ("clang_delta", "clex", "strlex");
+unifdef_CPPFLAGS =
 
-my $target = $ARGV[0];
+unifdef_SOURCES = \
+	unifdef.c \
+	unifdef.h \
+	version.h
+
+EXTRA_DIST = \
+	CMakeLists.txt
 
 ###############################################################################
 

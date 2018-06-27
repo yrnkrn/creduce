@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2013, 2014 The University of Utah
+// Copyright (c) 2012, 2013, 2014, 2016, 2017 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -14,8 +14,9 @@
 #include <string>
 #include <map>
 #include <set>
-#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/ADT/SmallSet.h"
 #include "Transformation.h"
 #include "clang/Basic/SourceLocation.h"
 
@@ -80,7 +81,7 @@ private:
                          const clang::FunctionDecl *>
             UsingFunctionDeclsMap;
 
-  typedef llvm::SmallPtrSet<const clang::FunctionDecl *, 50>
+  typedef llvm::SmallPtrSet<const clang::FunctionDecl *, 32>
             FunctionDeclsSet;
 
   typedef llvm::SmallPtrSet<const clang::FunctionDecl *, 5>
@@ -90,13 +91,15 @@ private:
                          MemberSpecializationSet *>
             MemberToSpecializationMap;
 
-  typedef llvm::SmallPtrSet<const clang::UsingDecl *, 50>
+  typedef llvm::SmallPtrSet<const clang::UsingDecl *, 32>
             UsingDeclsSet;
   
   typedef std::map<std::string, std::string>
             InlinedSystemFunctionsMap;
 
   typedef std::set<std::string> SystemFunctionsSet;
+
+  typedef llvm::SmallSet<clang::SourceLocation, 5> LocSet;
 
   virtual void Initialize(clang::ASTContext &context);
 
@@ -187,6 +190,8 @@ private:
   InlinedSystemFunctionsMap InlinedSystemFunctions;
 
   SystemFunctionsSet ExistingSystemFunctions;
+
+  LocSet VisitedLocations;
 
   FunctionDeclVector AllValidFunctionDecls;
 

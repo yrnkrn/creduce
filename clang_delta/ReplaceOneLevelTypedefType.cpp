@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2013 The University of Utah
+// Copyright (c) 2012, 2013, 2015, 2017 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -21,7 +21,6 @@
 #include "TransformationManager.h"
 
 using namespace clang;
-using namespace llvm;
 
 static const char *DescriptionMsg =
 "This pass literally replaces a typedef type with the underlying type \
@@ -120,6 +119,8 @@ void ReplaceOneLevelTypedefType::removeTypedefs()
 
 void ReplaceOneLevelTypedefType::handleOneTypedefTypeLoc(TypedefTypeLoc TLoc)
 {
+  if (isInIncludedFile(TLoc.getBeginLoc()))
+    return;
   const TypedefType *TdefTy = TLoc.getTypePtr();
   const TypedefDecl *TdefD = dyn_cast<TypedefDecl>(TdefTy->getDecl());
   if (!TdefD || TdefD->getLocStart().isInvalid())

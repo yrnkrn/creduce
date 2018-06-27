@@ -1,13 +1,13 @@
 /*
- * Copyright (c) 2013, 2014 The University of Utah
+ * Copyright (c) 2013, 2014, 2015, 2016 The University of Utah
  * All rights reserved.
  *
  * This file is distributed under the University of Illinois Open Source
  * License.  See the file COPYING for details.
  */
 
-#include <stdio.h>
 #include <assert.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 /*
@@ -29,8 +29,12 @@ enum tok_kind {
   TOK_OTHER,
   TOK_NUMBER,
   TOK_WS,
+  TOK_NEWLINE,
   TOK_STRING,
   TOK_UNKNOWN,
 };
 
-void process_token (enum tok_kind);
+void process_token(enum tok_kind);
+
+#define OK 51
+#define STOP 71

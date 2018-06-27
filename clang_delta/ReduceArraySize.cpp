@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2014 The University of Utah
+// Copyright (c) 2012, 2014, 2015, 2017 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -23,7 +23,6 @@
 #include "TransformationManager.h"
 
 using namespace clang;
-using namespace llvm;
 
 static const char *DescriptionMsg =
 "Reduce the size of an array to the maximum index of \
@@ -183,6 +182,9 @@ void ReduceArraySize::rewriteArrayVarDecl(void)
 
 void ReduceArraySize::handleOneVar(const VarDecl *VD)
 {
+  if (isInIncludedFile(VD))
+    return;
+
   const Type *Ty = VD->getType().getTypePtr();
   const ArrayType *ArrayTy = dyn_cast<ArrayType>(Ty);
   if (!ArrayTy)

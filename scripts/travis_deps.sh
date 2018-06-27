@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 ##
-## Copyright (c) 2015 The University of Utah
+## Copyright (c) 2015, 2016, 2017, 2018 The University of Utah
 ## Copyright (c) 2015 Tamir Duberstein
 ## All rights reserved.
 ##
@@ -16,43 +16,47 @@ set -eux
 
 apt-get update -qq
 
+# The Travis-CI Ubuntu 16.04 ("xenial") build environment has LLVM and Clang
+# preinstalled.  They interfere with our installations of these packages.
+apt-get remove -y -qq \
+    clang \
+    llvm \
+    llvm-runtime
+
 # Install programs "add-apt-repository" and "wget", needed below.
 apt-get install -y -qq \
-    python-software-properties \
+    software-properties-common \
     wget
 
-# Set up for installing LLVM 3.6.
+# Set up for installing LLVM 6.0.
 # See <https://wiki.ubuntu.com/ToolChain>.
 # See <http://llvm.org/apt/>.
 add-apt-repository -y \
     ppa:ubuntu-toolchain-r/test
 add-apt-repository -y \
-    'deb http://llvm.org/apt/precise/ llvm-toolchain-precise-3.6 main'
-wget -O - http://llvm.org/apt/llvm-snapshot.gpg.key | apt-key add -
+    'deb http://apt.llvm.org/xenial/ llvm-toolchain-xenial-6.0 main'
+wget -O - http://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add -
 apt-get update -qq
 
-# Install LLVM 3.6.  See file "INSTALL".
+# Install LLVM 6.0.  See file "INSTALL".
 apt-get install -y -qq \
-    llvm-3.6 \
-    clang-3.6 \
-    libclang-3.6-dev \
-    clang-format-3.6 \
+    llvm-6.0 \
+    llvm-6.0-dev \
+    clang-6.0 \
+    libclang-6.0-dev \
+    clang-format-6.0 \
     libedit-dev
 
 # Install other C-Reduce dependencies.  See file "INSTALL".
 apt-get install -y -qq \
-    indent \
-    astyle \
-    delta \
-    libbenchmark-timer-perl \
     libexporter-lite-perl \
     libfile-which-perl \
     libgetopt-tabular-perl \
     libregexp-common-perl \
-    libsys-cpu-perl \
+    libterm-readkey-perl \
     flex \
     build-essential \
-    libz-dev
+    zlib1g-dev
 
 ###############################################################################
 

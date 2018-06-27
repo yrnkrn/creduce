@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012 The University of Utah
+// Copyright (c) 2012, 2016 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -70,6 +70,8 @@ private:
   llvm::SmallVector<char, 26> AvailableNames;
 
   llvm::DenseMap<clang::VarDecl *, std::string> VarToNameMap;
+
+  llvm::SmallPtrSet<clang::DeclRefExpr *, 10> VisitedDREs;
 
   // Unimplemented
   RenameVar(void);

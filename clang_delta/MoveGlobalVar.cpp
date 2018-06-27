@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012 The University of Utah
+// Copyright (c) 2012, 2015, 2016 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -43,8 +43,16 @@ bool MoveGlobalVar::isSpecialDecl(const std::string &Name)
 
 bool MoveGlobalVar::HandleTopLevelDecl(DeclGroupRef D) 
 {
+  if (TransformationManager::isCXXLangOpt()) {
+    ValidInstanceNum = 0;
+    return true;
+  }
+
   DeclGroupRef::iterator I = D.begin();
   TransAssert((I != D.end()) && "Bad DeclGroupRef!");
+
+  if (isInIncludedFile(*I))
+    return true;
 
   const NamedDecl *ND = dyn_cast<NamedDecl>(*I);
   if (!TheFirstDecl && ND && isSpecialDecl(ND->getNameAsString()))

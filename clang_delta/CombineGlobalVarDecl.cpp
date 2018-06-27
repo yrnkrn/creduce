@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2013 The University of Utah
+// Copyright (c) 2012, 2013, 2015, 2017 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -23,7 +23,6 @@
 #include "TransformationManager.h"
 
 using namespace clang;
-using namespace llvm;
 
 static const char *DescriptionMsg =
 "Combine global variable declarations with the same type. \
@@ -54,7 +53,7 @@ bool CombineGlobalVarDecl::HandleTopLevelDecl(DeclGroupRef DGR)
 {
   DeclGroupRef::iterator DI = DGR.begin();
   VarDecl *VD = dyn_cast<VarDecl>(*DI);
-  if (!VD)
+  if (!VD || isInIncludedFile(VD))
     return true;
   SourceRange Range = VD->getSourceRange();
   if (Range.getBegin().isInvalid() || Range.getEnd().isInvalid())

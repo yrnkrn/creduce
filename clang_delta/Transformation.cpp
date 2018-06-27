@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2013, 2014, 2015 The University of Utah
+// Copyright (c) 2012, 2013, 2014, 2015, 2016, 2017 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -25,11 +25,11 @@
 
 using namespace clang;
 
-class TransNameQueryVisitor : public 
+class TransNameQueryVisitor : public
         RecursiveASTVisitor<TransNameQueryVisitor> {
 
 public:
-  TransNameQueryVisitor(TransNameQueryWrap *Instance, 
+  TransNameQueryVisitor(TransNameQueryWrap *Instance,
                         const std::string &Prefix)
     : WrapInstance(Instance),
       NamePrefix(Prefix)
@@ -83,11 +83,11 @@ bool TransNameQueryWrap::TraverseDecl(Decl *D)
   return NameQueryVisitor->TraverseDecl(D);
 }
 
-void Transformation::Initialize(ASTContext &context) 
+void Transformation::Initialize(ASTContext &context)
 {
   Context = &context;
   SrcManager = &Context->getSourceManager();
-  TheRewriter.setSourceMgr(Context->getSourceManager(), 
+  TheRewriter.setSourceMgr(Context->getSourceManager(),
                            Context->getLangOpts());
   RewriteHelper = RewriteUtils::GetInstance(&TheRewriter);
 }
@@ -108,7 +108,7 @@ void Transformation::outputOriginalSource(llvm::raw_ostream &OutStream)
   FileID MainFileID = SrcManager->getMainFileID();
   const llvm::MemoryBuffer *MainBuf = SrcManager->getBuffer(MainFileID);
   TransAssert(MainBuf && "Empty MainBuf!");
-  OutStream << MainBuf->getBufferStart(); 
+  OutStream << MainBuf->getBufferStart();
   OutStream.flush();
 }
 
@@ -121,7 +121,7 @@ void Transformation::getTransErrorMsg(std::string &ErrorMsg)
     ErrorMsg = "Internal transformation error!";
   }
   else if (TransError == TransMaxInstanceError) {
-    ErrorMsg = 
+    ErrorMsg =
       "The counter value exceeded the number of transformation instances!";
   }
   else if (TransError == TransMaxVarsError) {
@@ -143,7 +143,7 @@ void Transformation::getTransErrorMsg(std::string &ErrorMsg)
     ErrorMsg = "No modification to the transformed program!";
   }
   else if (TransError == TransToCounterTooBigError) {
-    ErrorMsg = 
+    ErrorMsg =
       "The to-counter value exceeded the number of transformation instances!";
   }
   else {
@@ -196,8 +196,13 @@ const Expr *Transformation::getInitExprByIndex(IndexVector &Idxs,
   }
 
   TransAssert(Exp && "Exp cannot be NULL");
-  TransAssert(Count == Idxs.size());
-  return Exp;
+  // If array-to-pointer-decay happens, the Count can
+  // be different from the size of Idxs. In this case,
+  // we just return NULL.
+  if (Count == Idxs.size())
+    return Exp;
+  else
+    return NULL;
 }
 
 const Expr *Transformation::getArrayBaseExprAndIdxs(
@@ -264,10 +269,11 @@ const Expr *Transformation::getMemberExprBaseExprAndIdxs(
   while (ME) {
     ValueDecl *VD = ME->getMemberDecl();
     FieldDecl *FD = dyn_cast<FieldDecl>(VD);
-    TransAssert(FD && "Bad FD!\n");
+    if (!FD)
+      return NULL;
     unsigned int Idx = FD->getFieldIndex();
     Idxs.push_back(Idx);
-  
+
     BaseE = ME->getBase()->IgnoreParenCasts();
     const ArraySubscriptExpr *ASE = dyn_cast<ArraySubscriptExpr>(BaseE);
     if (ASE) {
@@ -283,11 +289,12 @@ const Expr *Transformation::getMemberExprBaseExprAndIdxs(
 bool Transformation::isCXXMemberExpr(const MemberExpr *ME)
 {
   const ValueDecl *VD = ME->getMemberDecl();
-  if (dyn_cast<CXXMethodDecl>(VD))
-    return true;
 
   const FieldDecl *FD = dyn_cast<FieldDecl>(VD);
-  TransAssert(FD && "Bad FieldDecl!");
+  // VD can be either CXXMethodDecl, EnumConstantDecl or
+  // VarDecl (static data member)
+  if (!FD)
+    return true;
   const CXXRecordDecl *CXXRD = dyn_cast<CXXRecordDecl>(FD->getParent());
   if (!CXXRD)
     return false;
@@ -302,6 +309,8 @@ const Expr *Transformation::getMemberExprElem(const MemberExpr *ME)
 
   IndexVector Idxs;
   const Expr *BaseE = getMemberExprBaseExprAndIdxs(ME, Idxs);
+  if (!BaseE)
+    return NULL;
   return getInitExprFromBase(BaseE, Idxs);
 }
 
@@ -335,13 +344,7 @@ unsigned int Transformation::getArrayDimensionAndTypes(
 
 const Type *Transformation::getArrayBaseElemType(const ArrayType *ArrayTy)
 {
-  const Type *ArrayElemTy = ArrayTy->getElementType().getTypePtr();
-  while (ArrayElemTy->isArrayType()) {
-    const ArrayType *AT = dyn_cast<ArrayType>(ArrayElemTy);
-    ArrayElemTy = AT->getElementType().getTypePtr();
-  }
-  TransAssert(ArrayElemTy && "Bad Array Element Type!");
-  return ArrayElemTy;
+  return ArrayTy->getBaseElementTypeUnsafe();
 }
 
 unsigned int Transformation::getConstArraySize(
@@ -420,7 +423,7 @@ const Expr *Transformation::getBaseExprAndIdxExprs(
 
 const Type *Transformation::getBasePointerElemType(const Type *Ty)
 {
-  QualType QT = Ty->getPointeeType();;
+  QualType QT = Ty->getPointeeType();
   while (!QT.isNull()) {
     Ty = QT.getTypePtr();
     QT = Ty->getPointeeType();
@@ -482,7 +485,7 @@ const FunctionDecl *Transformation::lookupFunctionDeclInGlobal(
 
   for (DeclContext::decl_iterator I = Ctx->decls_begin(),
        E = Ctx->decls_end(); I != E; ++I) {
-    if (const ClassTemplateDecl *ClassTemplate = 
+    if (const ClassTemplateDecl *ClassTemplate =
         dyn_cast<ClassTemplateDecl>(*I)) {
       const CXXRecordDecl *CXXRD = ClassTemplate->getTemplatedDecl();
       if (const FunctionDecl *FD = lookupFunctionDeclInGlobal(DName, CXXRD)) {
@@ -493,7 +496,7 @@ const FunctionDecl *Transformation::lookupFunctionDeclInGlobal(
     const DeclContext *SubCtx = dyn_cast<DeclContext>(*I);
     if (!SubCtx || dyn_cast<LinkageSpecDecl>(SubCtx))
       continue;
-    
+
     if (const FunctionDecl *FD = lookupFunctionDeclInGlobal(DName, SubCtx)) {
       return FD;
     }
@@ -503,8 +506,8 @@ const FunctionDecl *Transformation::lookupFunctionDeclInGlobal(
 }
 
 const FunctionDecl *Transformation::lookupFunctionDeclFromBases(
-        DeclarationName &DName, 
-        const CXXRecordDecl *CXXRD, 
+        DeclarationName &DName,
+        const CXXRecordDecl *CXXRD,
         DeclContextSet &VisitedCtxs)
 {
   for (CXXRecordDecl::base_class_const_iterator I =
@@ -520,7 +523,7 @@ const FunctionDecl *Transformation::lookupFunctionDeclFromBases(
     const CXXRecordDecl *BaseDef = Base->getDefinition();
     if (!BaseDef)
       continue;
-    if (const FunctionDecl *FD = 
+    if (const FunctionDecl *FD =
         lookupFunctionDecl(DName, BaseDef, VisitedCtxs))
       return FD;
   }
@@ -528,7 +531,7 @@ const FunctionDecl *Transformation::lookupFunctionDeclFromBases(
 }
 
 const FunctionDecl *Transformation::lookupFunctionDeclFromCtx(
-        DeclarationName &DName, 
+        DeclarationName &DName,
         const DeclContext *Ctx,
         DeclContextSet &VisitedCtxs)
 {
@@ -545,19 +548,19 @@ const FunctionDecl *Transformation::lookupFunctionDeclFromCtx(
     if (const UsingShadowDecl *USD = dyn_cast<UsingShadowDecl>(*I)) {
       TD = dyn_cast<FunctionTemplateDecl>(USD->getTargetDecl());
     }
-    else { 
+    else {
       TD = dyn_cast<FunctionTemplateDecl>(*I);
     }
     if (TD)
       return TD->getTemplatedDecl();
 
-    if (const UnresolvedUsingValueDecl *UUD = 
+    if (const UnresolvedUsingValueDecl *UUD =
         dyn_cast<UnresolvedUsingValueDecl>(*I)) {
       const NestedNameSpecifier *NNS = UUD->getQualifier();
       const DeclContext *Ctx = getDeclContextFromSpecifier(NNS);
       if (!Ctx)
         continue;
-      if (const FunctionDecl *FD = 
+      if (const FunctionDecl *FD =
           lookupFunctionDecl(DName, Ctx, VisitedCtxs))
         return FD;
     }
@@ -566,8 +569,8 @@ const FunctionDecl *Transformation::lookupFunctionDeclFromCtx(
 }
 
 const FunctionDecl *Transformation::lookupFunctionDecl(
-        DeclarationName &DName, 
-        const DeclContext *Ctx, 
+        DeclarationName &DName,
+        const DeclContext *Ctx,
         DeclContextSet &VisitedCtxs)
 {
   if (dyn_cast<LinkageSpecDecl>(Ctx))
@@ -576,18 +579,18 @@ const FunctionDecl *Transformation::lookupFunctionDecl(
     return NULL;
   VisitedCtxs.insert(Ctx);
 
-  if (const FunctionDecl *FD = 
+  if (const FunctionDecl *FD =
       lookupFunctionDeclFromCtx(DName, Ctx, VisitedCtxs))
     return FD;
- 
+
   // lookup base classes:
-  // this would be slow and may re-visit some Ctx. 
+  // this would be slow and may re-visit some Ctx.
   // Probably we should cache those Ctx(s) which have been visited
   // to speedup lookup
   if (Ctx->isRecord()) {
     const RecordDecl *RD = dyn_cast<RecordDecl>(Ctx);
     if (const CXXRecordDecl *CXXRD = dyn_cast<CXXRecordDecl>(RD)) {
-      if (const FunctionDecl *FD = 
+      if (const FunctionDecl *FD =
           lookupFunctionDeclFromBases(DName, CXXRD, VisitedCtxs))
         return FD;
     }
@@ -659,14 +662,15 @@ const CXXRecordDecl *Transformation::getBaseDeclFromTemplateSpecializationType(
   TemplateName TplName = TSTy->getTemplateName();
   TemplateDecl *TplD = TplName.getAsTemplateDecl();
   TransAssert(TplD && "Invalid TemplateDecl!");
+  if (dyn_cast<TemplateTemplateParmDecl>(TplD)) {
+    return NULL;
+  }
   NamedDecl *ND = TplD->getTemplatedDecl();
   TransAssert(ND && "Invalid NamedDecl!");
 
   if (TypedefNameDecl *TdefD = dyn_cast<TypedefNameDecl>(ND)) {
     const Type *UnderlyingTy = TdefD->getUnderlyingType().getTypePtr();
-    const CXXRecordDecl *CXXRD = getBaseDeclFromType(UnderlyingTy);
-    TransAssert(CXXRD && "Invalid CXXRD from TypedefNameDecl!");
-    return CXXRD;
+    return getBaseDeclFromType(UnderlyingTy);
   }
 
   const CXXRecordDecl *CXXRD = dyn_cast<CXXRecordDecl>(ND);
@@ -685,11 +689,9 @@ const CXXRecordDecl *Transformation::getBaseDeclFromType(const Type *Ty)
 
   switch (TyClass) {
   case Type::TemplateSpecialization: {
-    const TemplateSpecializationType *TSTy = 
+    const TemplateSpecializationType *TSTy =
       dyn_cast<TemplateSpecializationType>(Ty);
-    Base = getBaseDeclFromTemplateSpecializationType(TSTy);
-    TransAssert(Base && "Bad base class type!");
-    return Base;
+    return getBaseDeclFromTemplateSpecializationType(TSTy);
   }
 
   case Type::DependentTemplateSpecialization: {
@@ -736,8 +738,14 @@ const CXXRecordDecl *Transformation::getBaseDeclFromType(const Type *Ty)
     return getBaseDeclFromType(PT);
   }
 
+  case Type::Pointer: {
+    const PointerType *PT = dyn_cast<PointerType>(Ty);
+    const Type *PTy = PT->getPointeeType().getTypePtr();
+    return getBaseDeclFromType(PTy);
+  }
+
   case Type::SubstTemplateTypeParm: {
-    const SubstTemplateTypeParmType *TP = 
+    const SubstTemplateTypeParmType *TP =
       dyn_cast<SubstTemplateTypeParmType>(Ty);
     const Type *ST = TP->getReplacementType().getTypePtr();
     return getBaseDeclFromType(ST);
@@ -745,12 +753,12 @@ const CXXRecordDecl *Transformation::getBaseDeclFromType(const Type *Ty)
 
   case Type::DependentName: {
     // It's not always the case that we could resolve a dependent name type.
-    // For example, 
+    // For example,
     //   template<typename T1, typename T2>
     //   struct AAA { typedef T2 new_type; };
     //   template<typename T3>
     //   struct BBB : public AAA<int, T3>::new_type { };
-    // In the above code, we can't figure out what new_type refers to 
+    // In the above code, we can't figure out what new_type refers to
     // until BBB is instantiated
     // Due to this reason, simply return NULL from here.
     return NULL;
@@ -758,7 +766,7 @@ const CXXRecordDecl *Transformation::getBaseDeclFromType(const Type *Ty)
 
   case Type::TemplateTypeParm: {
     // Yet another case we might not know the base class, e.g.,
-    // template<typename T1> 
+    // template<typename T1>
     // class AAA {
     //   struct BBB : T1 {};
     // };
@@ -770,6 +778,8 @@ const CXXRecordDecl *Transformation::getBaseDeclFromType(const Type *Ty)
   case Type::FunctionNoProto:
   case Type::SubstTemplateTypeParmPack:
   case Type::PackExpansion:
+  case Type::Vector:
+  case Type::ExtVector:
   case Type::Builtin: // fall-through
     return NULL;
 
@@ -779,6 +789,16 @@ const CXXRecordDecl *Transformation::getBaseDeclFromType(const Type *Ty)
     if (!AT)
       return NULL;
     return getBaseDeclFromType(AT);
+  }
+
+  case Type::TypeOfExpr: {
+    const Expr *E = dyn_cast<TypeOfExprType>(Ty)->getUnderlyingExpr();
+    return getBaseDeclFromType(E->getType().getTypePtr());
+  }
+
+  case Type::TypeOf: {
+    return getBaseDeclFromType(
+      dyn_cast<TypeOfType>(Ty)->getUnderlyingType().getTypePtr());
   }
 
   default:
@@ -794,7 +814,7 @@ const CXXRecordDecl *Transformation::getBaseDeclFromType(const Type *Ty)
     if (const ClassTemplateSpecializationDecl *CTSDecl =
         dyn_cast<ClassTemplateSpecializationDecl>(Base)) {
       Base = CTSDecl->getSpecializedTemplate()->getTemplatedDecl();
-      TransAssert(Base && 
+      TransAssert(Base &&
                   "Bad base decl from ClassTemplateSpecializationDecl!");
     }
   }
@@ -804,15 +824,15 @@ const CXXRecordDecl *Transformation::getBaseDeclFromType(const Type *Ty)
 
 bool Transformation::isParameterPack(const NamedDecl *ND)
 {
-  if (const NonTypeTemplateParmDecl *NonTypeD = 
+  if (const NonTypeTemplateParmDecl *NonTypeD =
       dyn_cast<NonTypeTemplateParmDecl>(ND)) {
     return NonTypeD->isParameterPack();
   }
-  else if (const TemplateTypeParmDecl *TypeD = 
+  else if (const TemplateTypeParmDecl *TypeD =
              dyn_cast<TemplateTypeParmDecl>(ND)) {
     return TypeD->isParameterPack();
   }
-  else if (const TemplateTemplateParmDecl *TmplD = 
+  else if (const TemplateTemplateParmDecl *TmplD =
              dyn_cast<TemplateTemplateParmDecl>(ND)) {
     return TmplD->isParameterPack();
   }
@@ -866,7 +886,7 @@ bool Transformation::replaceDependentNameString(const Type *Ty,
   if (!DependentTy)
     return false;
 
-  const TemplateTypeParmType *ParmTy = 
+  const TemplateTypeParmType *ParmTy =
     DependentTy->getAs<TemplateTypeParmType>();
   if (!ParmTy)
     return false;
@@ -918,11 +938,11 @@ bool Transformation::getTypedefString(const StringRef &Name,
     const Type *UnderlyingTy = D->getUnderlyingType().getTypePtr();
     Type::TypeClass TC = UnderlyingTy->getTypeClass();
     if (TC == Type::DependentName) {
-      if (replaceDependentNameString(UnderlyingTy, Args, 
+      if (replaceDependentNameString(UnderlyingTy, Args,
                                      NumArgs, Str, Typename))
         return true;
     }
-    else if (const TemplateTypeParmType *ParmTy = 
+    else if (const TemplateTypeParmType *ParmTy =
              UnderlyingTy->getAs<TemplateTypeParmType>()) {
       if (getTemplateTypeParmString(ParmTy, Args, NumArgs, Str))
         return true;
@@ -945,7 +965,7 @@ bool Transformation::getTypedefString(const StringRef &Name,
       return true;
   }
 
-  // TODO: really simplified lookup process, maybe need 
+  // TODO: really simplified lookup process, maybe need
   //       to check other decl context?
   return false;
 }
@@ -971,16 +991,16 @@ bool Transformation::getDependentNameTypeString(
 
   unsigned NumArgs = 0;
   const TemplateArgument *Args = NULL;
-  if (const TemplateSpecializationType *TST = 
+  if (const TemplateSpecializationType *TST =
       Ty->getAs<TemplateSpecializationType>()) {
     NumArgs = TST->getNumArgs();
     Args = TST->getArgs();
   }
-  return getTypedefString(IdInfo->getName(), 
+  return getTypedefString(IdInfo->getName(),
            BaseDef, Args, NumArgs, Str, Typename);
 }
 
-bool Transformation::getTypeString(const QualType &QT, 
+bool Transformation::getTypeString(const QualType &QT,
                                    std::string &Str,
                                    bool &Typename)
 {
@@ -989,7 +1009,7 @@ bool Transformation::getTypeString(const QualType &QT,
 
   switch (TC) {
   case Type::SubstTemplateTypeParm: {
-    const SubstTemplateTypeParmType *TP = 
+    const SubstTemplateTypeParmType *TP =
       dyn_cast<SubstTemplateTypeParmType>(Ty);
     return getTypeString(TP->getReplacementType(), Str, Typename);
   }
@@ -998,7 +1018,7 @@ bool Transformation::getTypeString(const QualType &QT,
     const ElaboratedType *ETy = dyn_cast<ElaboratedType>(Ty);
     return getTypeString(ETy->getNamedType(), Str, Typename);
   }
-  
+
   case Type::Typedef: {
     const TypedefType *TdefTy = dyn_cast<TypedefType>(Ty);
     const TypedefNameDecl *TdefD = TdefTy->getDecl();
@@ -1036,6 +1056,21 @@ unsigned Transformation::getNumExplicitDecls(const CXXRecordDecl *CXXRD)
       Num++;
   }
   return Num;
+}
+
+bool Transformation::isInIncludedFile(SourceLocation Loc) const
+{
+  return SrcManager->getFileID(Loc) != SrcManager->getMainFileID();
+}
+
+bool Transformation::isInIncludedFile(const Decl *D) const
+{
+  return isInIncludedFile(D->getLocation());
+}
+
+bool Transformation::isInIncludedFile(const Stmt *S) const
+{
+  return isInIncludedFile(S->getLocStart());
 }
 
 Transformation::~Transformation(void)

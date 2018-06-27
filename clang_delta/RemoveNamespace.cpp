@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //
-// Copyright (c) 2012, 2013, 2015 The University of Utah
+// Copyright (c) 2012, 2013, 2015, 2016, 2017 The University of Utah
 // All rights reserved.
 //
 // This file is distributed under the University of Illinois Open Source
@@ -22,7 +22,6 @@
 #include "TransformationManager.h"
 
 using namespace clang;
-using namespace llvm;
 
 static const char *DescriptionMsg =
 "Remove namespaces. This pass tries to remove namespace without \
@@ -31,7 +30,7 @@ introducing name conflicts. \n";
 static RegisterTransformation<RemoveNamespace>
          Trans("remove-namespace", DescriptionMsg);
 
-class RemoveNamespaceASTVisitor : public 
+class RemoveNamespaceASTVisitor : public
   RecursiveASTVisitor<RemoveNamespaceASTVisitor> {
 
 public:
@@ -48,9 +47,9 @@ private:
 
 // A visitor for rewriting decls in the namespace being removed
 // ISSUE: quite a lot of functionality could be provided by the
-//        RenameClassRewriteVisitor from RenameClass.cpp. 
-//        I have certain hesitation of factoring out 
-//        RenameClassRewriteVisitor for common uses. 
+//        RenameClassRewriteVisitor from RenameClass.cpp.
+//        I have certain hesitation of factoring out
+//        RenameClassRewriteVisitor for common uses.
 //        A couple of reasons:
 //        * RenameClassRewriteVisitor is only suitable for renaming
 //          classes, but here we will be facing more types, e.g., enum.
@@ -61,7 +60,7 @@ private:
 //          each other
 //        Therefore, we will have some code duplications (but not much
 //        since I put quite a few common utility functions into RewriteUtils)
-class RemoveNamespaceRewriteVisitor : public 
+class RemoveNamespaceRewriteVisitor : public
   RecursiveASTVisitor<RemoveNamespaceRewriteVisitor> {
 
 public:
@@ -169,9 +168,9 @@ bool RemoveNamespaceRewriteVisitor::VisitUsingDirectiveDecl(
     return true;
   }
 
-  const NamespaceDecl *CanonicalND = 
+  const NamespaceDecl *CanonicalND =
     D->getNominatedNamespace()->getCanonicalDecl();
-  
+
   if (CanonicalND == ConsumerInstance->TheNamespaceDecl) {
     // remove the entire Decl if it's in the following form:
     // * using namespace TheNameSpace; or
@@ -183,7 +182,7 @@ bool RemoveNamespaceRewriteVisitor::VisitUsingDirectiveDecl(
     else
       ConsumerInstance->removeLastNamespaceFromUsingDecl(D, CanonicalND);
   }
-  
+
   // handle cases like the following:
   // namespace NS1 { }
   // namespace NS2 {
@@ -223,7 +222,7 @@ bool RemoveNamespaceRewriteVisitor::VisitUsingDecl(UsingDecl *D)
 
   const NestedNameSpecifier *NNS = D->getQualifier();
   TransAssert(NNS && "Bad NameSpecifier!");
-  if (ConsumerInstance->isTheNamespaceSpecifier(NNS) && 
+  if (ConsumerInstance->isTheNamespaceSpecifier(NNS) &&
       (!PrefixLoc || ConsumerInstance->isGlobalNamespace(PrefixLoc))) {
     ConsumerInstance->RewriteHelper->removeDecl(D);
     SkipTraverseNestedNameSpecifier = true;
@@ -238,7 +237,7 @@ bool RemoveNamespaceRewriteVisitor::VisitNamespaceAliasDecl(
   if (ConsumerInstance->isForUsingNamedDecls)
     return true;
 
-  const NamespaceDecl *CanonicalND = 
+  const NamespaceDecl *CanonicalND =
     D->getNamespace()->getCanonicalDecl();
   if (D->getQualifier()) {
     TraverseNestedNameSpecifierLoc(D->getQualifierLoc());
@@ -294,7 +293,7 @@ bool RemoveNamespaceRewriteVisitor::VisitCXXDestructorDecl(
   if (!ConsumerInstance->getNewNamedDeclName(CXXRD, Name))
     return true;
 
-  // Avoid duplicated VisitDtor. 
+  // Avoid duplicated VisitDtor.
   // For example, in the code below:
   // template<typename T>
   // class SomeClass {
@@ -302,12 +301,12 @@ bool RemoveNamespaceRewriteVisitor::VisitCXXDestructorDecl(
   //   ~SomeClass<T>() {}
   // };
   // ~SomeClass<T>'s TypeLoc is represented as TemplateSpecializationTypeLoc
-  // In this case, ~SomeClass will be renamed from 
+  // In this case, ~SomeClass will be renamed from
   // VisitTemplateSpecializationTypeLoc.
   DeclarationNameInfo NameInfo = DtorDecl->getNameInfo();
   if ( TypeSourceInfo *TSInfo = NameInfo.getNamedTypeInfo()) {
     TypeLoc DtorLoc = TSInfo->getTypeLoc();
-    if (!DtorLoc.isNull() && 
+    if (!DtorLoc.isNull() &&
         (DtorLoc.getTypeLocClass() == TypeLoc::TemplateSpecialization))
       return true;
   }
@@ -321,7 +320,7 @@ bool RemoveNamespaceRewriteVisitor::VisitCXXMemberCallExpr(
        CXXMemberCallExpr *CXXCE)
 {
   const CXXRecordDecl *CXXRD = CXXCE->getRecordDecl();
-  // getRecordDEcl could return NULL if getImplicitObjectArgument() 
+  // getRecordDEcl could return NULL if getImplicitObjectArgument()
   // returns NULL
   if (!CXXRD || ConsumerInstance->isForUsingNamedDecls)
     return true;
@@ -338,7 +337,7 @@ bool RemoveNamespaceRewriteVisitor::VisitDeclRefExpr(DeclRefExpr *DRE)
 {
   NestedNameSpecifierLoc Loc = DRE->getQualifierLoc();
 
-  // traverse NestedNameSpecifier first, because we could probably 
+  // traverse NestedNameSpecifier first, because we could probably
   // ignore rewriting this DeclRefExpr
   TraverseNestedNameSpecifierLoc(Loc);
   // Avoid double-visit
@@ -378,7 +377,7 @@ bool RemoveNamespaceRewriteVisitor::VisitTemplateSpecializationTypeLoc(
        TemplateSpecializationTypeLoc TSPLoc)
 {
   const Type *Ty = TSPLoc.getTypePtr();
-  const TemplateSpecializationType *TST = 
+  const TemplateSpecializationType *TST =
     dyn_cast<TemplateSpecializationType>(Ty);
   TransAssert(TST && "Bad TemplateSpecializationType!");
 
@@ -386,7 +385,7 @@ bool RemoveNamespaceRewriteVisitor::VisitTemplateSpecializationTypeLoc(
   const TemplateDecl *TplD = TplName.getAsTemplateDecl();
   TransAssert(TplD && "Invalid TemplateDecl!");
   NamedDecl *ND = TplD->getTemplatedDecl();
-  // in some cases, ND could be NULL, e.g., the 
+  // in some cases, ND could be NULL, e.g., the
   // template template parameter code below:
   // template<template<class> class BBB>
   // struct AAA {
@@ -418,7 +417,7 @@ bool RemoveNamespaceRewriteVisitor::VisitClassTemplatePartialSpecializationDecl(
 {
   const Type *Ty = D->getInjectedSpecializationType().getTypePtr();
   TransAssert(Ty && "Bad TypePtr!");
-  const TemplateSpecializationType *TST = 
+  const TemplateSpecializationType *TST =
     dyn_cast<TemplateSpecializationType>(Ty);
   TransAssert(TST && "Bad TemplateSpecializationType!");
 
@@ -454,7 +453,7 @@ bool RemoveNamespaceRewriteVisitor::VisitDependentTemplateSpecializationTypeLoc(
        DependentTemplateSpecializationTypeLoc DTSLoc)
 {
   const Type *Ty = DTSLoc.getTypePtr();
-  const DependentTemplateSpecializationType *DTST = 
+  const DependentTemplateSpecializationType *DTST =
     dyn_cast<DependentTemplateSpecializationType>(Ty);
   TransAssert(DTST && "Bad DependentTemplateSpecializationType!");
 
@@ -507,7 +506,7 @@ bool RemoveNamespaceRewriteVisitor::VisitInjectedClassNameTypeLoc(
 bool RemoveNamespaceRewriteVisitor::VisitTypedefTypeLoc(TypedefTypeLoc TyLoc)
 {
   const TypedefNameDecl *D = TyLoc.getTypedefNameDecl();
-  
+
   std::string Name;
   if (ConsumerInstance->getNewName(D, Name)) {
     SourceLocation LocStart = TyLoc.getLocStart();
@@ -520,7 +519,7 @@ bool RemoveNamespaceRewriteVisitor::VisitTypedefTypeLoc(TypedefTypeLoc TyLoc)
 bool RemoveNamespaceRewriteVisitor::VisitEnumTypeLoc(EnumTypeLoc TyLoc)
 {
   const EnumDecl *D = TyLoc.getDecl();
-  
+
   std::string Name;
   if (ConsumerInstance->getNewName(D, Name)) {
     SourceLocation LocStart = TyLoc.getLocStart();
@@ -605,7 +604,7 @@ bool RemoveNamespaceRewriteVisitor::TraverseNestedNameSpecifierLoc(
     std::string Name = "";
     ConsumerInstance->getNewName(ND, Name);
 
-    // Skip it if this specifier is the same as ND's name. 
+    // Skip it if this specifier is the same as ND's name.
     // Note that the above case could only happen for UsingNamedDecls
     if (ConsumerInstance->isForUsingNamedDecls && (SpecifierName == NDName)) {
       // It could happen for example:
@@ -614,8 +613,8 @@ bool RemoveNamespaceRewriteVisitor::TraverseNestedNameSpecifierLoc(
       //   using namespace NS1;
       //   void bar() { NS1::foo(); }
       // }
-      // If we remove NS2, then the guard below avoids renaming 
-      // NS1::foo to NS1::foo::foo. 
+      // If we remove NS2, then the guard below avoids renaming
+      // NS1::foo to NS1::foo::foo.
       if (Name.empty()) {
         SkipRewriteName = true;
         return true;
@@ -630,7 +629,7 @@ bool RemoveNamespaceRewriteVisitor::TraverseNestedNameSpecifierLoc(
       // namespace NS3 {
       //   using namespace NS1;
       //   void bar() { NS2::foo(); }
-      // } 
+      // }
       // If we remove NS3, we do need to rename NS2::foo as NS1::NS2::foo
       if (!ConsumerInstance->isSuffix(Name, SpecifierName)) {
         SkipRewriteName = true;
@@ -647,19 +646,19 @@ bool RemoveNamespaceRewriteVisitor::TraverseNestedNameSpecifierLoc(
   return true;
 }
 
-void RemoveNamespace::Initialize(ASTContext &context) 
+void RemoveNamespace::Initialize(ASTContext &context)
 {
   Transformation::Initialize(context);
   CollectionVisitor = new RemoveNamespaceASTVisitor(this);
   RewriteVisitor = new RemoveNamespaceRewriteVisitor(this);
 }
 
-bool RemoveNamespace::HandleTopLevelDecl(DeclGroupRef D) 
+bool RemoveNamespace::HandleTopLevelDecl(DeclGroupRef D)
 {
   // Nothing to do
   return true;
 }
- 
+
 void RemoveNamespace::HandleTranslationUnit(ASTContext &Ctx)
 {
   if (TransformationManager::isCLangOpt()) {
@@ -684,7 +683,7 @@ void RemoveNamespace::HandleTranslationUnit(ASTContext &Ctx)
   Ctx.getDiagnostics().setSuppressAllDiagnostics(false);
 
   // First rename UsingNamedDecls, i.e., conflicting names
-  // from other namespaces. 
+  // from other namespaces.
   // FIXME: isForUsingNamedDecls flag is quite ugly,
   //        need a way to remove it
   isForUsingNamedDecls = true;
@@ -716,7 +715,7 @@ void RemoveNamespace::rewriteNamedDecls(void)
       break;
     }
     case Decl::ClassTemplateSpecialization: {
-      // Skip this case, which will be handled by 
+      // Skip this case, which will be handled by
       // VisitTemplateSpecializationTypeLoc
       break;
     }
@@ -733,7 +732,7 @@ bool RemoveNamespace::isValidNamedDeclKind(const NamedDecl *ND)
           isa<NamespaceAliasDecl>(ND));
 }
 
-bool RemoveNamespace::hasNameConflict(const NamedDecl *ND, 
+bool RemoveNamespace::hasNameConflict(const NamedDecl *ND,
                                       const DeclContext *ParentCtx)
 {
   // we cannot lookup names from LinkageSpecDecl, e.g.,
@@ -785,7 +784,7 @@ void RemoveNamespace::handleOneUsingShadowDecl(const UsingShadowDecl *UD,
   const NamedDecl *ND = UD->getTargetDecl();
   if (!hasNameConflict(ND, ParentCtx))
     return;
-  
+
   std::string NewName;
   const UsingDecl *D = UD->getUsingDecl();
 
@@ -820,7 +819,7 @@ void RemoveNamespace::handleOneUsingShadowDecl(const UsingShadowDecl *UD,
     NewName += IdInfo->getName();
   }
   UsingNamedDeclToNewName[ND] = NewName;
-  
+
   // the tied UsingDecl becomes useless, and hence it's removable
   UselessUsingDecls.insert(D);
 }
@@ -855,7 +854,6 @@ void RemoveNamespace::handleOneUsingDirectiveDecl(const UsingDirectiveDecl *UD,
     if (!isValidNamedDeclKind(NamedD))
       continue;
 
-    const IdentifierInfo *IdInfo = NamedD->getIdentifier();
     std::string NewName = "";
     if ( NestedNameSpecifierLoc QualifierLoc = UD->getQualifierLoc() ) {
       RewriteHelper->getQualifierAsString(QualifierLoc, NewName);
@@ -869,13 +867,24 @@ void RemoveNamespace::handleOneUsingDirectiveDecl(const UsingDirectiveDecl *UD,
     else if (const EnumDecl *ED = dyn_cast<EnumDecl>(NamedD)) {
       handleOneEnumDecl(ED, NewName, UsingNamedDeclToNewName, NULL);
     }
-    NewName += IdInfo->getName();
+    const FunctionDecl *FD = dyn_cast<FunctionDecl>(NamedD);
+    if (FD &&  FD->isOverloadedOperator()) {
+      const char *Op = clang::getOperatorSpelling(FD->getOverloadedOperator());
+      std::string OpStr(Op);
+      NewName += ("operator::" + OpStr);
+    }
+    else {
+      const IdentifierInfo *IdInfo = NamedD->getIdentifier();
+      if (!IdInfo)
+        continue;
+      NewName += IdInfo->getName();
+    }
     UsingNamedDeclToNewName[NamedD] = NewName;
   }
 
-  // We always remove this using directive, and in ThenNamespaceDecl 
-  // append the corresponding namespace specifier to all names from the 
-  // used namespace. The reason is that the conlicted name in the outter 
+  // We always remove this using directive, and in ThenNamespaceDecl
+  // append the corresponding namespace specifier to all names from the
+  // used namespace. The reason is that the conlicted name in the outter
   // namespace could appear after TheNamespaceDecl, e.g.,
   //   namespace NS1 {
   //     void foo() {}
@@ -969,6 +978,9 @@ void RemoveNamespace::addNamedDeclsFromNamespace(const NamespaceDecl *ND)
 
 bool RemoveNamespace::handleOneNamespaceDecl(NamespaceDecl *ND)
 {
+  if (isInIncludedFile(ND))
+    return true;
+
   NamespaceDecl *CanonicalND = ND->getCanonicalDecl();
   if (VisitedND.count(CanonicalND)) {
     if (TheNamespaceDecl == CanonicalND) {
@@ -1015,11 +1027,11 @@ void RemoveNamespace::removeNamespace(const NamespaceDecl *ND)
   TheRewriter.RemoveText(SourceRange(StartLoc, EndLoc));
 }
 
-bool RemoveNamespace::getNewNameFromNameMap(const NamedDecl *ND, 
+bool RemoveNamespace::getNewNameFromNameMap(const NamedDecl *ND,
                                             std::string &Name,
                                             const NamedDeclToNameMap &NameMap)
 {
-  NamedDeclToNameMap::const_iterator Pos = 
+  NamedDeclToNameMap::const_iterator Pos =
     NameMap.find(ND);
   if (Pos == NameMap.end())
     return false;
@@ -1058,7 +1070,7 @@ bool RemoveNamespace::getNewUsingNamedDeclName(const NamedDecl *ND,
   return getNewNameFromNameMap(ND, Name, UsingNamedDeclToNewName);
 }
 
-bool RemoveNamespace::getNewName(const NamedDecl *ND, 
+bool RemoveNamespace::getNewName(const NamedDecl *ND,
                                  std::string &Name)
 {
   if (isForUsingNamedDecls)
@@ -1087,7 +1099,7 @@ bool RemoveNamespace::isTheNamespaceSpecifier(const NestedNameSpecifier *NNS)
   NestedNameSpecifier::SpecifierKind Kind = NNS->getKind();
   switch (Kind) {
   case NestedNameSpecifier::Namespace: {
-    const NamespaceDecl *CanonicalND = 
+    const NamespaceDecl *CanonicalND =
       NNS->getAsNamespace()->getCanonicalDecl();
     return (CanonicalND == TheNamespaceDecl);
   }
@@ -1097,7 +1109,7 @@ bool RemoveNamespace::isTheNamespaceSpecifier(const NestedNameSpecifier *NNS)
     // we remove the namealias only when it doesn't have nestedspecifier
     if (NAD->getQualifier())
       return false;
-    const NamespaceDecl *CanonicalND = 
+    const NamespaceDecl *CanonicalND =
       NAD->getNamespace()->getCanonicalDecl();
     return (CanonicalND == TheNamespaceDecl);
   }
@@ -1158,7 +1170,7 @@ void RemoveNamespace::removeLastNamespaceFromUsingDecl(
   TransAssert((Offset < 0) && "Bad Offset Value!");
   IdLocStart = IdLocStart.getLocWithOffset(Offset);
 
-  TheRewriter.RemoveText(IdLocStart, 
+  TheRewriter.RemoveText(IdLocStart,
                          ND->getNameAsString().length() - Offset);
 }
 
